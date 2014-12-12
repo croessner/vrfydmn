@@ -1,0 +1,503 @@
+#!/usr/bin/python
+"""
+vrfdmn - a milter service for postfix
+Copyright (C) 2011  state of mind
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+"""
+
+import sys
+import os
+import pwd
+import grp
+import signal
+import Milter
+import threading
+
+from syslog import *
+from syslog import syslog as syslog
+from getopt import getopt
+from threading import Thread
+from email.header import decode_header
+from getopt import getopt
+
+
+NAME = "vrfydmn"
+
+# Default macros
+BINDADDR = "[::1]"
+PORT = 30072
+MILTERUSER = "milter"
+MILTERGROUP = "milter"
+PIDFILE = "/var/run/" + NAME + "/" + NAME + ".pid"
+VERSION = "0.3"
+POSTFIX_DOMAINS = "/etc/postfix/maps/domains"
+
+__version__ = VERSION
+__author__ = "Christian Roessner <c@roessner.co>"
+__copyright__ = "Copyright (C) 2011  R.N.S."
+
+
+class VrfyDmnMilter(Milter.Base):
+    """
+    Milter that comares the domain component of an email address read from the
+    From:-header and compares it to a list of Postfix domains. If a match is
+    found, mail is allowed to pass, else the mail is rejected.
+    """
+    
+    def __init__(self):
+        self.__id = Milter.uniqueID()
+        self.__ipname = None
+        self.__ip = None
+        self.__port = None
+        self.__reject = False
+        self.__dryrun_reject = False
+        self.__email = ""
+        self.__mail_from = ""
+        self.__original_from = ""
+        self.__add_header = True
+
+    @Milter.noreply
+    def connect(self, ipname, family, hostaddr):
+        """connect callback """
+
+        self.__ip = hostaddr[0]
+        self.__ipname = ipname
+        self.__port = hostaddr[1]
+
+        if Cfg.debug:
+            print("id=%i connect from %s[%s]:%s" % (self.__id,
+                                                    self.__ipname,
+                                                    self.__ip,
+                                                    self.__port))
+        syslog("connect from %s[%s]:%s" % (self.__ipname,
+                                           self.__ip,
+                                           self.__port))
+        return Milter.CONTINUE
+
+    @Milter.noreply
+    def envfrom(self, mailfrom, *str):
+        """Callback that is called when MAIL FROM: is recognized. This also
+        is the most earliest time, where we can collect nearly all connection
+        specific information.
+        """
+
+        self.__mail_from = mailfrom
+
+        return Milter.CONTINUE
+
+    @Milter.noreply
+    def header(self, name, hval):
+        """header callback gets called for each header"""
+
+        email = ""
+
+        if Cfg.debug:
+            print("%s: %s" % (name, hval))
+
+        if name.lower() == "from":
+            self.__original_from = hval
+
+            # Extract email from most right tuple
+            decoded_from = decode_header(hval)[-1]
+
+            # Try to find the email address and to cut off garbage
+            decoded_from_parts = decoded_from[0].split()
+            for component in iter(decoded_from_parts):
+                # NOTE: Assume the last occurence of an "@" represents the
+                # email address.
+                if "@" in component:
+                    email = component
+
+            # Cut everythin up to '<'
+            email = email.split("<")[-1]
+
+            # Remove '>' from email address
+            email = email.split(">")[0]
+
+            self.__email = email
+
+            # From: <> found, skip this mail
+            if email == "":
+                if Cfg.debug:
+                    print("id=%i %s return_value=skip"
+                          % (self.__id, self.getsymval('i')))
+                syslog(LOG_INFO, "%s: return_value=skip" % self.getsymval('i'))
+
+                return Milter.CONTINUE
+
+            # Cut local part from email
+            from_domain = email.split("@")[1]
+
+            # Honor sub domains
+            if PfDomains.domains != []:
+                if Cfg.fix_header:
+                    self.__dryrun_reject = True
+                else:
+                    self.__reject = True
+                for key_domain in iter(PfDomains.domains):
+                    if key_domain in from_domain:
+                        if Cfg.fix_header:
+                            self.__dryrun_reject = False
+                        else:
+                            self.__reject = False
+                        break
+
+            result = "reject" if self.__reject else "continue"
+
+            if Cfg.debug:
+                print("id=%i %s header_from=<%s> return_value=%s"
+                      % (self.__id, self.getsymval('i'), email, result))
+            syslog(LOG_INFO, "%s: header_from=<%s> return_value=%s"
+                   % (self.getsymval('i'), email, result))
+
+        if name.lower() == "reply-to":
+            self.__add_header = False
+
+        return Milter.CONTINUE
+
+    def eoh(self):
+        """eoh - end of header. Gets called after all headers have been
+        proccessed"""
+
+        if self.__reject:
+            self.setreply("554", xcode="5.7.0", msg="Reject Queue-ID: %s - "
+                          "Do not send mail with foreign From: <%s>"
+                          % (self.getsymval('i'), self.__email))
+
+            return Milter.REJECT
+
+        return Milter.CONTINUE
+
+    def eom(self):
+        """eom - end of message. If --fix was given at the command line, we
+        replace the broken From:-header with the MAIL FROM value"""
+
+        if (self.__dryrun_reject and
+            self.__email != self.__mail_from):
+
+            self.chgheader("From", 0, "<%s>" % self.__mail_from)
+            if Cfg.debug:
+                print("id=%i %s header_from=<%s> modified=<%s>"
+                      % (self.__id,
+                         self.getsymval('i'),
+                         self.__email,
+                         self.__mail_from))
+            syslog(LOG_INFO, "%s: header_from=<%s> modified=<%s>"
+                   % (self.getsymval('i'), self.__email, self.__mail_from))
+
+            if self.__add_header:
+                self.addheader("Reply-To", self.__original_from)
+                decoded_from = decode_header(self.__original_from)
+                new_from = " ".join([s for s, _ in decoded_from])
+                if Cfg.debug:
+                    print("id=%i %s reply_to: %s"
+                          % (self.__id, self.getsymval('i'), new_from))
+                syslog(LOG_INFO, "%s: reply_to: %s"
+                       % (self.getsymval('i'), new_from))
+
+        return Milter.CONTINUE
+
+    def close(self):
+        """close callback"""
+
+        if Cfg.debug:
+            print("id=%i disconnect from %s[%s]:%s" % (self.__id,
+                                                       self.__ipname,
+                                                       self.__ip,
+                                                       self.__port))
+        syslog("disconnect from %s[%s]:%s" % (self.__ipname,
+                                              self.__ip,
+                                              self.__port))
+
+        return Milter.CONTINUE
+
+
+class Cfg(object):
+    """Store configuration parameters"""
+
+    debug = False
+    fix_header = False
+    socketname = "inet6:%i@%s" % (PORT, BINDADDR)
+    milteruser = MILTERUSER
+    miltergroup = MILTERGROUP
+    pidfile = PIDFILE
+
+
+class MetaPfDomains(type):
+    """
+    PfDomains is a central store for all postfix domains that the milter
+    recognizes as trusted domains
+    """
+
+    _domains = list()
+
+    __lock = threading.Lock()
+
+    def _set_postfix_domains(meta, pf_file):
+        generated_list = list()
+
+        try:
+            with open(pf_file) as fd:
+                while True:
+                    raw_line = fd.readline()
+                    if raw_line == "":
+                        break
+
+                    line = raw_line.strip()
+
+                    # Skip comments and empty lines
+                    if line.startswith("#"):
+                        continue
+                    if line == "":
+                        continue
+
+                    key_domain = line.split()[0]
+                    generated_list.append(key_domain)
+
+                    # Make operation thread safe
+                    with MetaPfDomains.__lock:
+                        meta._domains = generated_list
+
+        except OSError, e:
+            # Unable to read Postfix domains!
+            if Cfg.debug:
+                print >> sys.stderr, ('Unable to read %s: %s' % (pf_file, e))
+            syslog(LOG_ERR, 'Unable to read %s: %s' % (pf_file, e))
+
+    def _get_postfix_domains(meta):
+        return meta._domains
+
+    domains = property(_get_postfix_domains, _set_postfix_domains)
+
+
+class PfDomains(object):
+    """We use a meta class, as the "domains" variable shall not be world
+    readable and writeable. This is a class with classmethods and properties
+    """
+
+    __metaclass__ = MetaPfDomains
+
+
+def runner():
+    """Starts the milter loop"""
+
+    Milter.factory = VrfyDmnMilter
+
+    flags = Milter.CHGHDRS + Milter.ADDHDRS
+    Milter.set_flags(flags)
+
+    Milter.runmilter(NAME, Cfg.socketname, timeout=300)
+
+
+def usage():
+    """Print a simple usage to stdout"""
+
+    print """%s [options]
+
+-s, --socket            IPv4, IPv6 socket including port (default: %s)
+-u, --user              Run milter as user (default: %s)
+-g, --group             Run milter as group (default: %s)
+-p, --pid               Pidfile to use (default: %s)
+
+-f, --file              Postfix domains map file (default: %s)
+-F, --fix               Replace broken From:-header with envelope sender
+
+-h, --help              Print this help
+-d, --debug             Run on foreground
+    """ % (NAME,
+           "inet6:" + str(PORT) + "@" + BINDADDR,
+           MILTERUSER,
+           MILTERGROUP,
+           PIDFILE,
+           POSTFIX_DOMAINS)
+
+
+def main():
+    pf_domains_map = None
+
+    # Read command line options
+    try:
+        opts = getopt(sys.argv[1:],
+                      "s:u:g:p:hdf:F",
+                      ["socket=",
+                       "user=",
+                       "group=",
+                       "pid=",
+                       "help",
+                       "debug",
+                       "file="])[0]
+
+        for opt, optarg in opts:
+            if opt in ("-h", "--help"):
+                usage()
+                sys.exit()
+            elif opt in ("-d", "--debug"):
+                Cfg.debug = True
+            elif opt in ("-f", "--file"):
+                pf_domains_map = str(optarg)
+            elif opt in ("-F", "--fix"):
+                Cfg.fix_header = True
+            elif opt in ("-s", "--socket"):
+                Cfg.socketname = optarg
+            elif opt in ("-u", "--user"):
+                Cfg.milteruser = optarg
+            elif opt in ("-g", "--group"):
+                Cfg.miltergroup = optarg
+            elif opt in ("-p", "--pid"):
+                Cfg.pidfile = optarg
+            else:
+                usage()
+                sys.exit(os.EX_USAGE)
+
+    except Exception, e:
+        print >> sys.stderr, "Syntax error: %s" % e
+        sys.exit(os.EX_USAGE)
+    
+    if pf_domains_map is None:
+        pf_domains_map = POSTFIX_DOMAINS
+
+    if not os.path.exists(pf_domains_map):
+        print >> sys.stderr, ('No such file: %s' % pf_domains_map)
+        sys.exit(os.EX_USAGE)
+
+    # Read list of domains
+    PfDomains.domains = pf_domains_map
+
+    # We want unbuffered stdout and stderr
+    unbuf_stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
+    unbuf_stderr = os.fdopen(sys.stderr.fileno(), 'w', 0)
+    sys.stdout = unbuf_stdout
+    sys.stderr = unbuf_stderr
+    
+    openlog(NAME, LOG_PID, LOG_MAIL)
+
+    uid = pwd.getpwnam(Cfg.milteruser)[2]
+    gid = grp.getgrnam(Cfg.miltergroup)[2]
+
+    try:
+        os.setgid(gid)
+    except OSError, e:
+        print >> sys.stderr, ('Could not set effective group id: %s' % e)
+        sys.exit(1)
+    try:
+        os.setuid(uid)
+    except OSError, e:
+        print >> sys.stderr, ('Could not set effective user id: %s' % e)
+        sys.exit(1)
+
+    if Cfg.debug:
+        print "Switched user to %s, group to %s" % (uid, gid)
+        print "Staying in foreground..."
+    else:
+        try:
+            pid = os.fork()
+        except OSError, e:
+            print >> sys.stderr, ("First fork failed: (%d) %s"
+                                  % (e.errno, e.strerror))
+            sys.exit(1)
+        if (pid == 0):
+            os.setsid()
+            try:
+                pid = os.fork()
+            except OSError, e:
+                print >> sys.stderr, ("Second fork failed: (%d) %s"
+                                      % (e.errno, e.strerror))
+                sys.exit(1)
+            if (pid == 0):
+                os.chdir("/")
+                os.umask(0)
+            else:
+                os._exit(0)
+        else:
+            os._exit(0)
+    
+        # In daemon mode, we redirect stdin, stdout and stderr to /dev/null   
+        sys.stdin  = file(os.devnull, "r")
+        sys.stdout = file(os.devnull, "w")
+        sys.stderr = file(os.devnull, "w")
+    
+    try:
+        with open(Cfg.pidfile, "w") as fd:
+            fd.write(str(os.getpid()))
+    except IOError, e:
+        if Cfg.debug:
+            print >> sys.stderr, ("Cannot create PID file: (%d) %s"
+                                  % (e.errno, e.strerror))
+        sys.exit(1)
+
+    def finish(signum, frame):
+        syslog(LOG_NOTICE,
+               "%s-%s milter shutdown. Caught signal %d"
+               % (NAME, VERSION, signum))
+    
+    def reload_postfix_domains(signum, frame):
+        if Cfg.debug:
+            print("%s-%s milter reload Postfix domains. Caught signal %d"
+                  % (NAME, VERSION, signum))
+        syslog(LOG_NOTICE,
+               "%s-%s milter reload Postfix domains. Caught signal %d"
+               % (NAME, VERSION, signum))
+
+        PfDomains.domains = pf_domains_map
+
+        # Go back to sleep
+        signal.pause()
+
+    def print_postfix_domains(signum, frame):
+        if Cfg.debug:
+            print("%s-%s milter Postfix domains: [%s]. Caught signal %d"
+                  % (NAME, VERSION, ", ".join(PfDomains.domains), signum))
+        syslog(LOG_NOTICE,
+               "%s-%s milter Postfix domains: [%s]. Caught signal %d"
+               % (NAME, VERSION, ", ".join(PfDomains.domains), signum))
+
+        # Go back to sleep
+        signal.pause()
+
+    signal.signal(signal.SIGINT, finish)
+    signal.signal(signal.SIGQUIT, finish)
+    signal.signal(signal.SIGTERM, finish)
+
+    signal.signal(signal.SIGHUP, reload_postfix_domains)
+    signal.signal(signal.SIGUSR1, print_postfix_domains)
+    signal.siginterrupt(signal.SIGHUP, False)
+    signal.siginterrupt(signal.SIGUSR1, False)
+    
+    syslog(LOG_NOTICE, "%s-%s milter startup" % (NAME, VERSION))
+
+    mlt = Thread(target=runner)
+    mlt.daemon = True
+    mlt.start()
+
+    # Waiting for SIGNAL to terminate process
+    signal.pause()
+
+    try:
+        if os.path.exists(Cfg.pidfile):
+            os.unlink(Cfg.pidfile)
+    except IOError, e:
+        if Cfg.debug:
+            print >> sys.stderr, ("Cannot remove PID file: (%d) %s"
+                                  % (e.errno, e.strerror))
+        sys.exit(1)
+
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
+
+# vim: expandtab ts=4 sw=4
