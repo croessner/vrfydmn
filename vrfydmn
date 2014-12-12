@@ -1,7 +1,7 @@
 #!/usr/bin/python
 """
 vrfdmn - a milter service for postfix
-Copyright (C) 2011  state of mind
+Copyright (C) 2011  R.N.S.
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
