@@ -53,6 +53,9 @@ in memory. You can send a -HUP signal to the milter to reload its maps and send
 a -USR1 signal to dump all domains to syslog (or stdout, if running in debug
 mode).
 
+For both scenarios described above, you can find a samlpe picture of my current
+mail system, which demonstrates the usecases
+
 Usage
 =====
 
