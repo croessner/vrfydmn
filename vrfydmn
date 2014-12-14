@@ -36,14 +36,13 @@ from getopt import getopt
 
 NAME = "vrfydmn"
 
-# Default macros
+# Defaults
 BINDADDR = "[::1]"
 PORT = 30072
 MILTERUSER = "milter"
 MILTERGROUP = "milter"
 PIDFILE = "/var/run/" + NAME + "/" + NAME + ".pid"
 VERSION = "0.3"
-POSTFIX_DOMAINS = "/etc/postfix/maps/domains"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -312,7 +311,10 @@ def usage():
 -g, --group             Run milter as group (default: %s)
 -p, --pid               Pidfile to use (default: %s)
 
--f, --file              Postfix domains map file (default: %s)
+Backend:
+-f, --file              Postfix domains map file
+
+Mode:
 -F, --fix               Replace broken From:-header with envelope sender
 
 -h, --help              Print this help
@@ -321,8 +323,7 @@ def usage():
            "inet6:" + str(PORT) + "@" + BINDADDR,
            MILTERUSER,
            MILTERGROUP,
-           PIDFILE,
-           POSTFIX_DOMAINS)
+           PIDFILE)
 
 
 def main():
@@ -366,15 +367,13 @@ def main():
         print >> sys.stderr, "Syntax error: %s" % e
         sys.exit(os.EX_USAGE)
     
-    if pf_domains_map is None:
-        pf_domains_map = POSTFIX_DOMAINS
+    if pf_domains_map is not None:
+        if not os.path.exists(pf_domains_map):
+            print >> sys.stderr, ('No such file: %s' % pf_domains_map)
+            sys.exit(os.EX_USAGE)
 
-    if not os.path.exists(pf_domains_map):
-        print >> sys.stderr, ('No such file: %s' % pf_domains_map)
-        sys.exit(os.EX_USAGE)
-
-    # Read list of domains
-    PfDomains.domains = pf_domains_map
+        # Read list of domains
+        PfDomains.domains = pf_domains_map
 
     # We want unbuffered stdout and stderr
     unbuf_stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
@@ -451,7 +450,8 @@ def main():
                "%s-%s milter reload Postfix domains. Caught signal %d"
                % (NAME, VERSION, signum))
 
-        PfDomains.domains = pf_domains_map
+        if pf_domains_map is not None:
+            PfDomains.domains = pf_domains_map
 
         # Go back to sleep
         signal.pause()

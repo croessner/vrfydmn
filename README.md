@@ -56,26 +56,6 @@ mode).
 For both scenarios described above, you can find a samlpe picture of my current
 mail system, which demonstrates the usecases
 
-Usage
-=====
-
-Install libmilter and pymilter (the python package that wraps the C library).
-After that you may create a user milter with group milter. I have provided two
-init scripts. The vrfydmn.init is for systems that use sysvinit, the
-vrfydmn.openrc is for Gentoo users (as I am). You may edit these and specify
-options for the milter. Simply call the milter with --help to get an idea.
-
-In Postfix, you may add the milter with:
-
-	non_smtpd_milters=inet:[::1]:30072
-
-for scenario one and
-
-	smtpd_milters=inet:[::1]:30072
-
-for the submission instance. Usually found in master.cf or maybe a second
-instance. This depends on your system.
-
 Features
 ========
 
