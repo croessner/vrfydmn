@@ -184,8 +184,8 @@ class VrfyDmnMilter(Milter.Base):
                     self.__reject = True
 
                 Cfg.workerQueue.put( (response,
-                                      Cfg.ldap_con.queryLdap,
-                                      from_domain) )
+                                      Cfg.ldap_con.queryLdap,   # func
+                                      (from_domain,)))          # *args
                 if response.get() is True:
                     found = True
                     if Cfg.fix_header:
@@ -595,9 +595,10 @@ def ldap_runner():
             if not req:
                 # Nothing more to process; skip
                 continue
-            response, func, p = req
+            # Queue, func, *args
+            response, func, args = req
             try:
-                result = func(p)
+                result = func(*args)
             except:
                 # FIXME
                 result = None
