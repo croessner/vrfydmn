@@ -457,12 +457,29 @@ def main():
         signal.pause()
 
     def print_postfix_domains(signum, frame):
-        if Cfg.debug:
-            print("%s-%s milter Postfix domains: [%s]. Caught signal %d"
-                  % (NAME, VERSION, ", ".join(PfDomains.domains), signum))
-        syslog(LOG_NOTICE,
-               "%s-%s milter Postfix domains: [%s]. Caught signal %d"
-               % (NAME, VERSION, ", ".join(PfDomains.domains), signum))
+        all_domains = ", ".join(PfDomains.domains)
+
+        # max syslog line length
+        offset = 1536
+        string_segments = []
+        max_len = len(all_domains)
+        d = "..."
+
+        for i in xrange(0, max_len, offset):
+            if i == 0:
+                string_segments.append(all_domains[i:i+offset].strip() + d)
+            if i > 0 and i+offset < max_len:
+                string_segments.append(d + all_domains[i:i+offset].strip() + d)
+            if i > 0 and i+offset >= max_len:
+                string_segments.append(d + all_domains[i:i+offset].strip())
+
+        for part in iter(string_segments):
+            if Cfg.debug:
+                print("%s-%s milter Postfix domains: [%s]"
+                      % (NAME, VERSION, part))
+            syslog(LOG_NOTICE,
+                   "%s-%s milter Postfix domains: [%s]"
+                   % (NAME, VERSION, part))
 
         # Go back to sleep
         signal.pause()
