@@ -1,0 +1,15 @@
+host = ldap://ldap.example.com/
+
+usetls = Yes
+cacert = /etc/ssl/certs/ca-certificates.crt
+cert = /etc/ssl/certs/foo.example.com.pem
+key = /etc/ssl/private/foo.example.com.key.pem
+reqcert = demand
+
+base = ou=mailDomains,ou=it,dc=example,dc=com
+bindmethod = sasl
+saslmech = EXTERNAL
+scope = base
+filter = (&(objectClass=rnsMSPostfixGroup)(rnsMSVirtDomain=*%s))
+result_attrs = ou
+
