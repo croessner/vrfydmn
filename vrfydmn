@@ -25,6 +25,15 @@ import grp
 import signal
 import Milter
 import threading
+import traceback
+
+try:
+    import ldap
+    import ldap.sasl
+except ImportError:
+    no_module_ldap = True
+else:
+    no_module_ldap = False
 
 from syslog import *
 from syslog import syslog as syslog
@@ -32,6 +41,7 @@ from getopt import getopt
 from threading import Thread
 from email.header import decode_header
 from getopt import getopt
+from Queue import Queue
 
 
 NAME = "vrfydmn"
@@ -47,6 +57,26 @@ VERSION = "0.3"
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
 __copyright__ = "Copyright (C) 2011  R.N.S."
+
+
+class Cfg(object):
+    """Store configuration parameters"""
+
+    debug = False
+    fix_header = False
+    socketname = "inet6:%i@%s" % (PORT, BINDADDR)
+    milteruser = MILTERUSER
+    miltergroup = MILTERGROUP
+    pidfile = PIDFILE
+
+    workerQueue = Queue()
+
+    use_flatfile = False
+    use_ldap = False
+    use_sql = False
+
+    ldap_cf = None
+    ldap_con = None
 
 
 class VrfyDmnMilter(Milter.Base):
@@ -109,6 +139,9 @@ class VrfyDmnMilter(Milter.Base):
         if name.lower() == "from":
             self.__original_from = hval
 
+            # Remember, if a domain was found
+            found = False
+
             # Extract email from most right tuple
             decoded_from = decode_header(hval)[-1]
 
@@ -140,19 +173,51 @@ class VrfyDmnMilter(Milter.Base):
             # Cut local part from email
             from_domain = email.split("@")[1]
 
-            # Honor sub domains
-            if PfDomains.domains != []:
+            compare_domains = []
+
+            if Cfg.use_ldap:
+                response = Queue()
+
                 if Cfg.fix_header:
                     self.__dryrun_reject = True
                 else:
                     self.__reject = True
-                for key_domain in iter(PfDomains.domains):
-                    if key_domain in from_domain:
-                        if Cfg.fix_header:
-                            self.__dryrun_reject = False
-                        else:
-                            self.__reject = False
-                        break
+
+                Cfg.workerQueue.put( (response,
+                                      Cfg.ldap_con.queryLdap,
+                                      from_domain) )
+                if response.get() is True:
+                    found = True
+                    if Cfg.fix_header:
+                        self.__dryrun_reject = False
+                    else:
+                        self.__reject = False
+                else:
+                    found = False
+                    if Cfg.fix_header:
+                        self.__dryrun_reject = True
+                    else:
+                        self.__reject = True
+
+            if not found and Cfg.use_sql:
+                pass
+
+            if not found and Cfg.use_flatfile:
+                # Honor sub domains
+                if Cfg.fix_header:
+                    self.__dryrun_reject = True
+                else:
+                    self.__reject = True
+                if PfDomains.domains != []:
+                    for key_domain in iter(PfDomains.domains):
+                        if key_domain in from_domain:
+                            if Cfg.fix_header:
+                                self.__dryrun_reject = False
+                                found = True
+                            else:
+                                self.__reject = False
+                                found = True
+                            break
 
             result = "reject" if self.__reject else "continue"
 
@@ -224,17 +289,6 @@ class VrfyDmnMilter(Milter.Base):
         return Milter.CONTINUE
 
 
-class Cfg(object):
-    """Store configuration parameters"""
-
-    debug = False
-    fix_header = False
-    socketname = "inet6:%i@%s" % (PORT, BINDADDR)
-    milteruser = MILTERUSER
-    miltergroup = MILTERGROUP
-    pidfile = PIDFILE
-
-
 class MetaPfDomains(type):
     """
     PfDomains is a central store for all postfix domains that the milter
@@ -290,6 +344,233 @@ class PfDomains(object):
     __metaclass__ = MetaPfDomains
 
 
+class Domains(object):
+    """
+    Base mixin class for all kinds of lists of domains. Each database driver
+    must derive from this base class. The constructor requires at least a
+    configuration file, which is directly parsed and evaluated. The result is
+    a dictionary that is stored internally. Each driver itself knows how to
+    deal with the values found.
+    
+    As the base class implements an iterator and a representation method, the
+    values being processed by each driver are returned as a list of domains.
+    
+    We do not keep database connections open, as a list of domains normally
+    does not float too often. Additionally the amount of domains will never be
+    too large, so we can read all data at once and keep it in memory.
+    
+    """
+    def __init__(self, cffile):
+        self._filecontent = {}
+        self._cf_read_err = False
+
+        try:
+            with open(cffile, "r") as fd:
+                while True:
+                    line = fd.readline()
+                    if line == "":
+                        break
+                    if line.count('=') >= 1:
+                        idx = line.find('=')
+                        k = line[0:idx].strip().lower()
+                        v = line[idx+1:].strip()
+                    else:
+                        k = line.strip().lower()
+                        v = []
+                    if k != "":
+                        self._filecontent[k] = v
+
+        except Exception, e:
+            # Unable to read config file
+            if Cfg.debug:
+                print >> sys.stderr, ('Unable to read %s: %s' % (cffile, e))
+            syslog(LOG_ERR, 'Unable to read %s: %s' % (cffile, e))
+            self._cf_read_err = True
+
+
+class LDAPDomains(Domains):
+    """
+    The LDAPDomains driver connects to a list of LDAP servers. It supports
+    simple and SASL authentication, as well as TLS connections.
+    
+    """
+    def __init__(self, cffile):
+        Domains.__init__(self, cffile)
+
+        self.__con = None
+
+        if self._cf_read_err:
+            return
+
+        self.__host = "ldap://127.0.0.1/"
+        self.__base = ""
+        self.__bindmethod = "simple"
+        self.__binddn = None
+        self.__bindpw = None
+        self.__saslmech = None
+        self.__authz_id = ""
+        self.__filter = "(objectClass=*)"
+        self.__result_attrs = []
+        self.__scope = "sub"
+        self.__usetls = False
+        self.__cipher = "TLSv1"
+        self.__reqcert = "never"
+        self.__cert = None
+        self.__key = None
+        self.__cacert = None
+        
+        for k, v in self._filecontent.items():
+            if k == "host":
+                self.__host = v.split(',')
+                for idx, server in enumerate(self.__host):
+                    self.__host[idx] = server.strip()
+            elif k == "base":
+                self.__base = v
+            elif k == "bindmethod":
+                self.__bindmethod = v
+            elif k == "binddn":
+                self.__binddn = v
+            elif k == "bindpw":
+                self.__bindpw = v
+            elif k == "saslmech":
+                self.__saslmech = v
+            elif k == "authzid":
+                self.__authz_id = v
+            elif k == "filter":
+                self.__filter = v
+            elif k == "result_attrs":
+                self.__result_attrs = v.split(',')
+                for idx, attr in enumerate(self.__result_attrs):
+                    self.__result_attrs[idx] = attr.strip()
+            elif k == "scope":
+                self.__scope = v
+            elif k == "usetls":
+                self.__usetls = v
+            elif k == "cipher":
+                self.__cipher = v
+            elif k == "reqcert":
+                self.__reqcert = v
+            elif k == "cert":
+                self.__cert = v
+            elif k == "key":
+                self.__key = v
+            elif k == "cacert":
+                self.__cacert = v
+            else:
+                raise Exception("Unsupported parameter %s: %s" % (k, v))
+        
+        tls = False
+        sasl = False
+
+        # Do we connect with TLS?
+        if self.__usetls.lower() in ("yes", "true", "1"):
+            if self.__reqcert in ("never", "allow", "try", "demand"):
+                if self.__reqcert == "never":
+                    reqcert = ldap.OPT_X_TLS_NEVER
+                elif self.__reqcert == "allow":
+                    reqcert = ldap.OPT_X_TLS_ALLOW
+                elif self.__reqcert == "try":
+                    reqcert = ldap.OPT_X_TLS_TRY
+                elif self.__reqcert == "demand":
+                    reqcert = ldap.OPT_X_TLS_DEMAND
+            else:
+                raise Exception("Unsupported TLS reqcert Option %s" % reqcert)
+            ldap.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, reqcert)
+            ldap.set_option(ldap.OPT_X_TLS_CIPHER_SUITE, self.__cipher)
+            if self.__cacert is not None:
+                ldap.set_option(ldap.OPT_X_TLS_CACERTFILE, self.__cacert)
+            if self.__cert is not None:
+                ldap.set_option(ldap.OPT_X_TLS_CERTFILE, self.__cert)
+            if self.__key is not None:
+                ldap.set_option(ldap.OPT_X_TLS_KEYFILE, self.__key)
+            tls = True
+
+        # Are we SASL binding to our servers?
+        if self.__bindmethod == "sasl":
+            if self.__saslmech.lower() == "digest-md5":
+                auth_tokens = ldap.sasl.digest_md5(self.__binddn,
+                                                   self.__bindpw)
+            elif self.__saslmech.lower() == "cram-md5":
+                auth_tokens = ldap.sasl.cram_md5(self.__binddn, self.__bindpw)
+            elif self.__saslmech.lower() == "external":
+                auth_tokens = ldap.sasl.external(self.__authz_id)
+            elif self.__saslmech.lower() == "gssapi":
+                auth_tokens = ldap.sasl.gssapi(self.__authz_id)
+            else:
+                raise Exception("Unsupported SASL mech %s" % self.__saslmech)
+            sasl = True
+
+        con = None
+        for server in iter(self.__host):
+            try:
+                con = ldap.initialize(server)
+                if tls:
+                    if Cfg.debug:
+                        print "con.start_tls_s()"
+                    con.start_tls_s()
+                if sasl:
+                    if Cfg.debug:
+                        print "con.sasl_interactive_bind_s()"
+                    con.sasl_interactive_bind_s("", auth_tokens)
+                else:
+                    if Cfg.debug:
+                        print "con.simple_bind_s()"
+                    con.simple_bind_s(self.__binddn, self.__bindpw)
+            except Exception, e:
+                if Cfg.debug:
+                    traceback.print_exc()
+                continue
+            break
+
+        self.__con = con
+    
+    def queryLdap(self, from_domain):
+        if self.__con is None:
+            return
+
+        if self.__scope in ("sub", "subtree"):
+            scope = ldap.SCOPE_SUBTREE
+        elif self.__scope in ("one", "onelevel"):
+            scope = ldap.SCOPE_ONELEVEL
+        elif self.__scope in ("base", "exact"):
+            scope = ldap.SCOPE_BASE
+        else:
+            raise Exception("Unsupported LDAP scope %s" % self.__scope)
+
+        if "%s" in self.__filter.lower():
+            filter_parts = self.__filter.split("%s")
+            ldap_filter = from_domain.join(filter_parts)
+
+        if Cfg.debug:
+            print("====> LDAP-filter: %s" % ldap_filter)
+
+        rid = self.__con.search(self.__base,
+                                scope,
+                                ldap_filter,
+                                self.__result_attrs)
+
+        # Temporarily store the result
+        tmp_lst = list()
+
+        # raw_res[0] - LDAP connection
+        # raw_res[1] - list of tuples
+        raw_res = (None, None)
+        raw_res = self.__con.result(rid, True, 60)
+        if raw_res[0] == None:
+            self.__con.abandon(rid)
+            raise ldap.TIMEOUT("LDAP server timeout")
+        for entry in raw_res[1]:
+            for res_attrs in entry[1].values()[0]:
+                tmp_lst.append(res_attrs)
+                if Cfg.debug:
+                    print "----> res_attrs = %s" % res_attrs
+                    
+        if tmp_lst != []:
+            return True
+        else:
+            return False
+
+
 def runner():
     """Starts the milter loop"""
 
@@ -299,6 +580,28 @@ def runner():
     Milter.set_flags(flags)
 
     Milter.runmilter(NAME, Cfg.socketname, timeout=300)
+
+
+def ldap_runner():
+    """Implements a bi-directional queue that allows all milter threads to
+    communicate with one single thread that does all LDAP operations.
+
+    """
+    Cfg.ldap_con = LDAPDomains(Cfg.ldap_cf)
+
+    if Cfg.ldap_con is not None:
+        while True:
+            req = Cfg.workerQueue.get()
+            if not req:
+                # Nothing more to process; skip
+                continue
+            response, func, p = req
+            try:
+                result = func(p)
+            except:
+                # FIXME
+                result = None
+            response.put(result)
 
 
 def usage():
@@ -313,6 +616,7 @@ def usage():
 
 Backend:
 -f, --file              Postfix domains map file
+-l, --ldap              Config file for a LDAP connection
 
 Mode:
 -F, --fix               Replace broken From:-header with envelope sender
@@ -332,14 +636,15 @@ def main():
     # Read command line options
     try:
         opts = getopt(sys.argv[1:],
-                      "s:u:g:p:hdf:F",
+                      "s:u:g:p:hdf:l:F",
                       ["socket=",
                        "user=",
                        "group=",
                        "pid=",
                        "help",
                        "debug",
-                       "file="])[0]
+                       "file=",
+                       "ldap="])[0]
 
         for opt, optarg in opts:
             if opt in ("-h", "--help"):
@@ -349,6 +654,13 @@ def main():
                 Cfg.debug = True
             elif opt in ("-f", "--file"):
                 pf_domains_map = str(optarg)
+                Cfg.use_flatfile = True
+            elif opt in ("-l", "--ldap"):
+                if not no_module_ldap:
+                    Cfg.ldap_cf = optarg
+                    Cfg.use_ldap = True
+                else:
+                    print >> sys.stderr, "Missing python module ldap!"
             elif opt in ("-F", "--fix"):
                 Cfg.fix_header = True
             elif opt in ("-s", "--socket"):
@@ -385,6 +697,12 @@ def main():
 
     uid = pwd.getpwnam(Cfg.milteruser)[2]
     gid = grp.getgrnam(Cfg.miltergroup)[2]
+
+    try:
+        # Needs Python >=2.7
+        os.initgroups(Cfg.milteruser, gid)
+    except:
+        pass
 
     try:
         os.setgid(gid)
@@ -450,36 +768,37 @@ def main():
                "%s-%s milter reload Postfix domains. Caught signal %d"
                % (NAME, VERSION, signum))
 
-        if pf_domains_map is not None:
+        if Cfg.use_flatfile and pf_domains_map is not None:
             PfDomains.domains = pf_domains_map
 
         # Go back to sleep
         signal.pause()
 
     def print_postfix_domains(signum, frame):
-        all_domains = ", ".join(PfDomains.domains)
+        if Cfg.use_flatfile:
+            all_domains = ", ".join(PfDomains.domains)
 
-        # max syslog line length
-        offset = 1536
-        string_segments = []
-        max_len = len(all_domains)
-        d = "..."
+            # max syslog line length
+            offset = 1536
+            str_sgmts = []
+            max_len = len(all_domains)
+            d = "..."
 
-        for i in xrange(0, max_len, offset):
-            if i == 0:
-                string_segments.append(all_domains[i:i+offset].strip() + d)
-            if i > 0 and i+offset < max_len:
-                string_segments.append(d + all_domains[i:i+offset].strip() + d)
-            if i > 0 and i+offset >= max_len:
-                string_segments.append(d + all_domains[i:i+offset].strip())
+            for i in xrange(0, max_len, offset):
+                if i == 0:
+                    str_sgmts.append(all_domains[i:i+offset].strip() + d)
+                if i > 0 and i+offset < max_len:
+                    str_sgmts.append(d + all_domains[i:i+offset].strip() + d)
+                if i > 0 and i+offset >= max_len:
+                    str_sgmts.append(d + all_domains[i:i+offset].strip())
 
-        for part in iter(string_segments):
-            if Cfg.debug:
-                print("%s-%s milter Postfix domains: [%s]"
-                      % (NAME, VERSION, part))
-            syslog(LOG_NOTICE,
-                   "%s-%s milter Postfix domains: [%s]"
-                   % (NAME, VERSION, part))
+            for part in iter(str_sgmts):
+                if Cfg.debug:
+                    print("%s-%s milter Postfix domains: [%s]"
+                          % (NAME, VERSION, part))
+                syslog(LOG_NOTICE,
+                       "%s-%s milter Postfix domains: [%s]"
+                       % (NAME, VERSION, part))
 
         # Go back to sleep
         signal.pause()
@@ -495,9 +814,14 @@ def main():
     
     syslog(LOG_NOTICE, "%s-%s milter startup" % (NAME, VERSION))
 
-    mlt = Thread(target=runner)
-    mlt.daemon = True
-    mlt.start()
+    milter_t = Thread(target=runner)
+    milter_t.daemon = True
+    milter_t.start()
+
+    if Cfg.use_ldap:
+        ldap_runner_t = Thread(target=ldap_runner)
+        ldap_runner_t.daemon = True
+        ldap_runner_t.start()
 
     # Waiting for SIGNAL to terminate process
     signal.pause()
