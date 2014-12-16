@@ -46,9 +46,8 @@ else:
 from syslog import *
 from syslog import syslog as syslog
 from getopt import getopt
-from threading import Thread
 from email.header import decode_header
-from getopt import getopt
+from threading import Thread
 from Queue import Queue
 
 
@@ -184,8 +183,6 @@ class VrfyDmnMilter(Milter.Base):
             # Cut local part from email
             from_domain = email.split("@")[1]
 
-            compare_domains = []
-
             if Cfg.use_ldap:
                 response = Queue()
 
@@ -194,9 +191,9 @@ class VrfyDmnMilter(Milter.Base):
                 else:
                     self.__reject = True
 
-                Cfg.workerQueue.put( (response,
-                                      Cfg.ldap_con.queryLdap,   # func
-                                      (from_domain,)))          # *args
+                Cfg.workerQueue.put((response,
+                                     Cfg.ldap_con.queryLdap,    # func
+                                     (from_domain,)))           # *args
                 result = response.get()
                 if result is True or result is None:
                     found = True
@@ -250,7 +247,8 @@ class VrfyDmnMilter(Milter.Base):
 
         if self.__reject:
             self.setreply("554", xcode="5.7.0", msg="Reject Queue-ID: %s - "
-                          "Do not send mail with foreign From: <%s>"
+                          "Do not send mail with forged "
+                          "RFC5322 from address: <%s>"
                           % (self.getsymval('i'), self.__email))
 
             return Milter.REJECT
