@@ -30,6 +30,7 @@ import traceback
 try:
     import ldap
     import ldap.sasl
+    from ldap.ldapobject import ReconnectLDAPObject
 except ImportError:
     no_module_ldap = True
 else:
@@ -51,8 +52,9 @@ BINDADDR = "[::1]"
 PORT = 30072
 MILTERUSER = "milter"
 MILTERGROUP = "milter"
+LDAP_TIMEOUT = 60
 PIDFILE = "/var/run/" + NAME + "/" + NAME + ".pid"
-VERSION = "0.3"
+VERSION = "0.4"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -186,13 +188,14 @@ class VrfyDmnMilter(Milter.Base):
                 Cfg.workerQueue.put( (response,
                                       Cfg.ldap_con.queryLdap,   # func
                                       (from_domain,)))          # *args
-                if response.get() is True:
+                result = response.get()
+                if result is True or result is None:
                     found = True
                     if Cfg.fix_header:
                         self.__dryrun_reject = False
                     else:
                         self.__reject = False
-                else:
+                elif result is False:
                     found = False
                     if Cfg.fix_header:
                         self.__dryrun_reject = True
@@ -503,7 +506,7 @@ class LDAPDomains(Domains):
         con = None
         for server in iter(self.__host):
             try:
-                con = ldap.initialize(server)
+                con = ReconnectLDAPObject(server, retry_max=1000000)
                 if tls:
                     if Cfg.debug:
                         print "con.start_tls_s()"
@@ -544,23 +547,18 @@ class LDAPDomains(Domains):
         if Cfg.debug:
             print("====> LDAP-filter: %s" % ldap_filter)
 
-        rid = self.__con.search(self.__base,
-                                scope,
-                                ldap_filter,
-                                self.__result_attrs)
+        result = self.__con.search_st(self.__base,
+                                      scope,
+                                      ldap_filter,
+                                      self.__result_attrs,
+                                      timeout=LDAP_TIMEOUT)
 
         # Temporarily store the result
         tmp_lst = list()
 
-        # raw_res[0] - LDAP connection
-        # raw_res[1] - list of tuples
-        raw_res = (None, None)
-        raw_res = self.__con.result(rid, True, 60)
-        if raw_res[0] == None:
-            self.__con.abandon(rid)
-            raise ldap.TIMEOUT("LDAP server timeout")
-        for entry in raw_res[1]:
-            for res_attrs in entry[1].values()[0]:
+        # result - list of tuples
+        for row in iter(result):
+            for res_attrs in row[1].values()[0]:
                 tmp_lst.append(res_attrs)
                 if Cfg.debug:
                     print "----> res_attrs = %s" % res_attrs
@@ -599,8 +597,8 @@ def ldap_runner():
             response, func, args = req
             try:
                 result = func(*args)
-            except:
-                # FIXME
+            except Exception, e:
+                traceback.print_exc()
                 result = None
             response.put(result)
 
