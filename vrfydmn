@@ -406,8 +406,6 @@ class LDAPDomains(Domains):
     simple and SASL authentication, as well as TLS connections.
     
     """
-    __lock = threading.Lock()
-
     def __init__(self, cffile):
         Domains.__init__(self, cffile)
 
@@ -532,6 +530,7 @@ class LDAPDomains(Domains):
 
         self.__con = con
     
+    # This method is synchronized with Queue()
     def queryLdap(self, from_domain):
         if self.__con is None:
             return
@@ -583,13 +582,11 @@ class LDAPDomains(Domains):
                     
         if tmp_lst != []:
             if Cfg.use_memcached:
-                with LDAPDomains.__lock:
-                    Cfg.memcached_con.set(from_domain, True, time=3600)
+                Cfg.memcached_con.set(from_domain, True, time=3600)
             return True
         else:
             if Cfg.use_memcached:
-                with LDAPDomains.__lock:
-                    Cfg.memcached_con.set(from_domain, False, time=60)
+                Cfg.memcached_con.set(from_domain, False, time=60)
             return False
 
 
