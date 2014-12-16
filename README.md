@@ -59,5 +59,5 @@ mail system, which demonstrates the usecases
 Features
 ========
 
-I might integrate LDAP and SQL servers as well for lookups.
+I might integrate SQL servers as well for lookups.
 

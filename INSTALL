@@ -10,10 +10,7 @@ options for the milter. Simply call the milter with --help to get an idea.
 Place vrfydmn into /usr/local/sbin. If you chose another path, you might need
 to adopt the path in the init script.
 
-You must specify a domain mapping file (Postfix style) with the option '-f', or
-the milter will accept all mail. This is due the fact that other backends will
-be implemented and the 'file' backend is the first method that is currently
-usable.
+You need to run the milter with -f or -l (see --help).
 
 In Postfix, you may add the milter with:
 
@@ -25,4 +22,24 @@ for scenario one and
 
 for the submission instance. Usually found in master.cf or maybe a second
 instance. This depends on your system.
+
+LDAP
+====
+
+You can use LDAP. For this, you need to install python-ldap (with SASL support)
+
+For an example config file, see doc/relay_domains.cf
+
+Full documentation will come soon.
+
+Memcached
+=========
+
+You can run LDAP combined with memcached. For this, add:
+
+-m 127.0.0.1:11211
+
+as argument in the init script.
+
+Positive results are stored for one hour, negative for 60 seconds.
 

@@ -36,6 +36,13 @@ except ImportError:
 else:
     no_module_ldap = False
 
+try:
+    import memcache
+except ImportError:
+    no_module_memcache = True
+else:
+    no_module_memcache = False
+
 from syslog import *
 from syslog import syslog as syslog
 from getopt import getopt
@@ -76,10 +83,12 @@ class Cfg(object):
     use_flatfile = False
     use_ldap = False
     use_sql = False
+    use_memcached = False
 
     ldap_cf = None
     ldap_con = None
 
+    memcached_con = None
 
 class VrfyDmnMilter(Milter.Base):
     """
@@ -397,6 +406,8 @@ class LDAPDomains(Domains):
     simple and SASL authentication, as well as TLS connections.
     
     """
+    __lock = threading.Lock()
+
     def __init__(self, cffile):
         Domains.__init__(self, cffile)
 
@@ -508,16 +519,10 @@ class LDAPDomains(Domains):
             try:
                 con = ReconnectLDAPObject(server, retry_max=1000000)
                 if tls:
-                    if Cfg.debug:
-                        print "con.start_tls_s()"
                     con.start_tls_s()
                 if sasl:
-                    if Cfg.debug:
-                        print "con.sasl_interactive_bind_s()"
                     con.sasl_interactive_bind_s("", auth_tokens)
                 else:
-                    if Cfg.debug:
-                        print "con.simple_bind_s()"
                     con.simple_bind_s(self.__binddn, self.__bindpw)
             except Exception, e:
                 if Cfg.debug:
@@ -530,6 +535,19 @@ class LDAPDomains(Domains):
     def queryLdap(self, from_domain):
         if self.__con is None:
             return
+
+        if Cfg.use_memcached:
+            result = Cfg.memcached_con.get(from_domain)
+            if result is not None:
+                result = bool(result)
+                if result:
+                    text = "continue"
+                else:
+                    text = "reject"
+                if Cfg.debug:
+                    print("cached_result: %s=%s" % (from_domain, text))
+                syslog(LOG_INFO, "cached_result: %s=%s" % (from_domain, text))
+                return result
 
         if self.__scope in ("sub", "subtree"):
             scope = ldap.SCOPE_SUBTREE
@@ -564,8 +582,14 @@ class LDAPDomains(Domains):
                     print "----> res_attrs = %s" % res_attrs
                     
         if tmp_lst != []:
+            if Cfg.use_memcached:
+                with LDAPDomains.__lock:
+                    Cfg.memcached_con.set(from_domain, True, time=3600)
             return True
         else:
+            if Cfg.use_memcached:
+                with LDAPDomains.__lock:
+                    Cfg.memcached_con.set(from_domain, False, time=60)
             return False
 
 
@@ -580,14 +604,25 @@ def runner():
     Milter.runmilter(NAME, Cfg.socketname, timeout=300)
 
 
-def ldap_runner():
+def db_runner():
     """Implements a bi-directional queue that allows all milter threads to
-    communicate with one single thread that does all LDAP operations.
+    communicate with one single thread that does all DB operations.
 
     """
-    Cfg.ldap_con = LDAPDomains(Cfg.ldap_cf)
+    db_running = False
 
-    if Cfg.ldap_con is not None:
+    if Cfg.use_memcached:
+        Cfg.memcached_con = memcache.Client([Cfg.memcached], debug=0)
+
+    if Cfg.use_ldap:
+        Cfg.ldap_con = LDAPDomains(Cfg.ldap_cf)
+        if Cfg.ldap_con is not None:
+            db_running = True
+
+    if Cfg.use_sql:
+        pass
+
+    if db_running:
         while True:
             req = Cfg.workerQueue.get()
             if not req:
@@ -616,6 +651,7 @@ def usage():
 Backend:
 -f, --file              Postfix domains map file
 -l, --ldap              Config file for a LDAP connection
+-m, --memcached         memcachd socket
 
 Mode:
 -F, --fix               Replace broken From:-header with envelope sender
@@ -635,7 +671,7 @@ def main():
     # Read command line options
     try:
         opts = getopt(sys.argv[1:],
-                      "s:u:g:p:hdf:l:F",
+                      "s:u:g:p:hdf:l:m:F",
                       ["socket=",
                        "user=",
                        "group=",
@@ -643,7 +679,8 @@ def main():
                        "help",
                        "debug",
                        "file=",
-                       "ldap="])[0]
+                       "ldap=",
+                       "memcached="])[0]
 
         for opt, optarg in opts:
             if opt in ("-h", "--help"):
@@ -660,6 +697,12 @@ def main():
                     Cfg.use_ldap = True
                 else:
                     print >> sys.stderr, "Missing python module ldap!"
+            elif opt in ("-m", "--memcached"):
+                if not no_module_ldap:
+                    Cfg.memcached = optarg
+                    Cfg.use_memcached = True
+                else:
+                    print >> sys.stderr, "Missing python module memcache!"
             elif opt in ("-F", "--fix"):
                 Cfg.fix_header = True
             elif opt in ("-s", "--socket"):
@@ -817,10 +860,10 @@ def main():
     milter_t.daemon = True
     milter_t.start()
 
-    if Cfg.use_ldap:
-        ldap_runner_t = Thread(target=ldap_runner)
-        ldap_runner_t.daemon = True
-        ldap_runner_t.start()
+    # Worker thread for all kinds of databases
+    db_runner_t = Thread(target=db_runner)
+    db_runner_t.daemon = True
+    db_runner_t.start()
 
     # Waiting for SIGNAL to terminate process
     signal.pause()
