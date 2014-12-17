@@ -160,6 +160,8 @@ class VrfyDmnMilter(Milter.Base):
             for component in iter(decoded_from_parts):
                 # NOTE: Assume the last occurence of an "@" represents the
                 # email address.
+                # NOTE: RFC5322 allows a mailbox-list for the From field! 
+                # Currently this fact is ignored!
                 if "@" in component:
                     email = component
 
