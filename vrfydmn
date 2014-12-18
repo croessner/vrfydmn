@@ -648,7 +648,7 @@ def usage():
 Backend:
 -f, --file              Postfix domains map file
 -l, --ldap              Config file for a LDAP connection
--m, --memcached         memcachd socket
+-m, --memcached         memcached socket
 
 Mode:
 -F, --fix               Replace broken From:-header with envelope sender

@@ -1,0 +1,73 @@
+.\" Manpage for vrfydmn.
+.\" Contact c@roessner.co to correct errors or typos.
+.TH man 8 "18 Dec 2014" "0.4" "vrfydmn man page"
+.SH NAME
+vrfydmn \- Milter that rejects a forged or modified RFC5322 from address
+.SH SYNOPSIS
+vrfydmn OPTIONS -f, --file FLATFILE | -l, --ldap LDAP_CONFIG
+.PP
+vrfydmn -h, --help
+.SH DESCRIPTION
+vrfydmn is a milter that can check a RFC5322 from address and compare it to a list of domains coming from a flat file or a LDAP connection.
+The domains provided should reflect the domains that your MX is a final destination for. If an address with a foreign domain component was
+found, the milter can either reject the mail or copy the given address to a RFC5322 Reply-To header (if none already was specified) and it
+restores the RCF5322 from header with the envelope-from (MAIL FROM) address.
+.PP
+The purpose is to reject mail that might be phishing mail due to stolen mail accounts or to prevent mail loss in cases, where the given
+address was under DMARC policy, i.e. Yahoo or AOL.
+.PP
+Web servers that provide hosting for several domains might have dozens of contact forms.  Often they use a given e-mail address provides by
+a website visitor to use this address as a RFC5322 from address. If the web server is forwarding mail to a relay server that delivers mail
+to the internet, mails might get lost, as a remote MX might enforce DMARC policies.  In such a case, a bounced mail could not be sent back
+to the original sender.
+.PP
+Normal use is on web servers, where you might already provide an enevelope from address with sendmail(8) -f or on the submission (port 587)
+side.
+.SH OPTIONS
+.TP
+.B -u, --user USER (default: milter)
+Run the milter with user USER
+.TP
+.B -g, --group GROUP (default: milter)
+Run the milter with group GROUP
+.TP
+.B -s, --socket SOCKET (default: inet6:30072@[::1])
+Specify the socket the miler is listening on. This may be either an IPv4 or IPv6 socket.
+.TP
+Examples:
+.TP
+inet6:30072@[::1]
+.TP
+inet:10000@127.0.0.1
+.TP
+.B -p, --pid PIDFILE (default: /var/run/vrfydmn/vrfydmn.pid)
+Specify a pid file, which is created upon startup. Make sure that you create the directory with proper permissions!
+.TP
+.B -f, --file FLATEFILE (default: none)
+This file typically is a \fBpostfix\fR(8) map, i.e. relay_domains file. It should be a map with 2 columns. First column is the domain (the key)
+and the second column represents some value. The value is totally ignored in vrfydmn! If a flat file was given, the file can be refreshed
+during runtime by sending the SIGHUP signal and the result can be dumped to syslog (or standard out, if -d, --debug was given) with the SIGUSR1
+signal.
+.TP
+.B -l, --ldap LDAP_CONFIG (default: none)
+This option specifies a LDAP configuration file. Settings found in this file will enable a persistent LDAP connection. See \fBvrfydmn_ldap\fR(5)
+for the syntax and available options
+.TP
+.B -m, --memcached SOCKET (default: none)
+A memcached can be wrapped around a LDAP connection. SOCKET is typically 127.0.0.1:11211. Adopt it to your needs, if you want to enable support
+for this option.
+.TP
+.B -f, --fix
+Instead of rejecting mails with a forged/modified RFC5322 from header, copy this header to a Reply-To field (if none already exists) and restore
+the from header field with the envelope-from (MAIL FROM) mail address. This option is recommended for web servers.
+.TP
+.B -d, --debug
+Run the milter in forground. In this mode, all information concerning an e-mail session will be dumped to standard out. It also will print
+out the result of the check.
+.SH SEE ALSO
+vrfydmn_ldap(5)
+.SH BUGS
+Normally RFC5322 from address may of the form mailbox-list. As this is a very uncommon case, the milter currently only picks the last found
+address for testing.
+.SH AUTHOR
+Christian Roessner (c@roessner.co)
