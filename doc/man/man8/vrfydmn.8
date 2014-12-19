@@ -4,7 +4,7 @@
 .SH NAME
 vrfydmn \- Milter that rejects a forged or modified RFC5322 from address
 .SH SYNOPSIS
-vrfydmn OPTIONS -f, --file FLATFILE | -l, --ldap LDAP_CONFIG
+vrfydmn OPTIONS -f, --file FLATFILE and/or -l, --ldap LDAP_CONFIG
 .PP
 vrfydmn -h, --help
 .SH DESCRIPTION
@@ -40,8 +40,8 @@ inet6:30072@[::1]
 .TP
 inet:10000@127.0.0.1
 .TP
-.B -p, --pid PIDFILE (default: /var/run/vrfydmn/vrfydmn.pid)
-Specify a pid file, which is created upon startup. Make sure that you create the directory with proper permissions!
+.B -p, --pid PIDFILE (default: none)
+Specify a pid file, which is created upon startup.
 .TP
 .B -f, --file FLATEFILE (default: none)
 This file typically is a \fBpostfix\fR(8) map, i.e. relay_domains file. It should be a map with 2 columns. First column is the domain (the key)
