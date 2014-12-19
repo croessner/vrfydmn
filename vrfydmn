@@ -1,7 +1,7 @@
 #!/usr/bin/python
 """
 vrfdmn - a milter service for postfix
-Copyright (C) 2011  R.N.S.
+Copyright (C) 2014  R.N.S.
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -59,7 +59,6 @@ PORT = 30072
 MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
-PIDFILE = "/var/run/" + NAME + "/" + NAME + ".pid"
 VERSION = "0.4"
 
 __version__ = VERSION
@@ -75,7 +74,7 @@ class Cfg(object):
     socketname = "inet6:%i@%s" % (PORT, BINDADDR)
     milteruser = MILTERUSER
     miltergroup = MILTERGROUP
-    pidfile = PIDFILE
+    pidfile = None
 
     workerQueue = Queue()
 
@@ -187,12 +186,10 @@ class VrfyDmnMilter(Milter.Base):
 
             if Cfg.use_ldap:
                 response = Queue()
-
                 if Cfg.fix_header:
                     self.__dryrun_reject = True
                 else:
                     self.__reject = True
-
                 Cfg.workerQueue.put((response,
                                      Cfg.ldap_con.queryLdap,    # func
                                      (from_domain,)))           # *args
@@ -209,25 +206,25 @@ class VrfyDmnMilter(Milter.Base):
                         self.__dryrun_reject = True
                     else:
                         self.__reject = True
+                else:
+                    pass
 
             if not found and Cfg.use_sql:
                 pass
 
             if not found and Cfg.use_flatfile:
-                # Honor sub domains
                 if Cfg.fix_header:
                     self.__dryrun_reject = True
                 else:
                     self.__reject = True
                 if PfDomains.domains != []:
+                    # Honor sub domains
                     for key_domain in iter(PfDomains.domains):
                         if key_domain in from_domain:
                             if Cfg.fix_header:
                                 self.__dryrun_reject = False
-                                found = True
                             else:
                                 self.__reject = False
-                                found = True
                             break
 
             result = "reject" if self.__reject else "continue"
@@ -643,7 +640,7 @@ def usage():
 -s, --socket            IPv4, IPv6 socket including port (default: %s)
 -u, --user              Run milter as user (default: %s)
 -g, --group             Run milter as group (default: %s)
--p, --pid               Pidfile to use (default: %s)
+-p, --pid               Pidfile to use
 
 Backend:
 -f, --file              Postfix domains map file
@@ -658,8 +655,7 @@ Mode:
     """ % (NAME,
            "inet6:" + str(PORT) + "@" + BINDADDR,
            MILTERUSER,
-           MILTERGROUP,
-           PIDFILE)
+           MILTERGROUP)
 
 
 def main():
@@ -786,13 +782,13 @@ def main():
         sys.stderr = file(os.devnull, "w")
     
     try:
-        with open(Cfg.pidfile, "w") as fd:
-            fd.write(str(os.getpid()))
+        if Cfg.pidfile is not None:
+            with open(Cfg.pidfile, "w") as fd:
+                fd.write(str(os.getpid()))
     except IOError, e:
         if Cfg.debug:
             print >> sys.stderr, ("Cannot create PID file: (%d) %s"
                                   % (e.errno, e.strerror))
-        sys.exit(1)
 
     def finish(signum, frame):
         syslog(LOG_NOTICE,
@@ -866,7 +862,7 @@ def main():
     signal.pause()
 
     try:
-        if os.path.exists(Cfg.pidfile):
+        if Cfg.pidfile is not None and os.path.exists(Cfg.pidfile):
             os.unlink(Cfg.pidfile)
     except IOError, e:
         if Cfg.debug:
