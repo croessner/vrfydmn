@@ -1,0 +1,209 @@
+'\" t
+.\"     Title: vrfydmn_ldap
+.\"    Author: [see the "AUTHOR" section]
+.\" Generator: DocBook XSL Stylesheets v1.78.1 <http://docbook.sf.net/>
+.\"      Date: 02/09/2015
+.\"    Manual: vrfydmn Manual
+.\"    Source: vrfydmn_ldap 0.4
+.\"  Language: English
+.\"
+.TH "VRFYDMN_LDAP" "5" "02/09/2015" "vrfydmn_ldap 0\&.4" "vrfydmn Manual"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
+.SH "NAME"
+vrfydmn_ldap \- lookup RFC5322 From:\-addresses in an LDAP database\&.
+.SH "SYNOPSIS"
+.sp
+\fBvrfydmn\fR \-l \fIldap:///etc/vrfydmn/ldap\&.cfg\fR
+.SH "DESCRIPTION"
+.sp
+vrfydmn uses lists and tables to lookup mail related informations\&. A lookup tables may be an LDAP database\&.
+.sp
+In order to use LDAP lookups, specify a path to a file holding LDAP connection and query configuration\&. The path must be given when \fBvrfydmn\fR is invoked on command line:
+.sp
+\fBvrfydmn\fR \-l \fIldap:///etc/vrfydmn/ldap\&.cfg\fR
+.SH "OPTIONS"
+.PP
+\fBbase\fR (default: None)
+.RS 4
+The RFC2253 base DN at which to conduct the search, e\&.g\&.
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+base = ou=maildomains,dc=example,dc=com
+.fi
+.if n \{\
+.RE
+.\}
+.RE
+.PP
+\fBbindmethod\fR (default: None)
+.RS 4
+The method used when binding to the LDAP server\&. Valid options are simple or sasl\&.
+.RE
+.PP
+\fBcacert\fR (default: None)
+.RS 4
+Specifies the file that contains certificates for all of the Certificate Authorities the client will recognize\&.
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+cacert = /etc/ssl/certs/cacerts\&.pem
+.fi
+.if n \{\
+.RE
+.\}
+.RE
+.PP
+\fBcert\fR (default: None)
+.RS 4
+Specifies the file that contains the client certificate\&.
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+cert = /etc/ssl/certs/mail\&.example\&.com\-crt\&.pem
+.fi
+.if n \{\
+.RE
+.\}
+.RE
+.PP
+\fBfilter\fR (default: None)
+.RS 4
+The RFC2254 filter used to search the directory, e\&.g\&.
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+filter = (domain=*)
+.fi
+.if n \{\
+.RE
+.\}
+.RE
+.PP
+\fBhost\fR (default: None)
+.RS 4
+The name of the host running the LDAP server, e\&.g\&.
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+host = 127\&.0\&.0\&.1, ldap\&.example\&.com
+.fi
+.if n \{\
+.RE
+.\}
+.RE
+.PP
+\fBkey\fR (default: None)
+.RS 4
+Specifies the file that contains the private key that matches the certificate stored in the cert file\&. Currently, the private key must not be protected with a password, so it is of critical importance that the key file is protected carefully\&.
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+key = /etc/ssl/private/mail\&.example\&.com\-key\&.pem
+.fi
+.if n \{\
+.RE
+.\}
+.RE
+.PP
+\fBreqcert\fR (default: \fBdemand\fR)
+.RS 4
+Specifies what checks to perform on server certificates in a TLS session, if any\&. The <level> can be specified as one of the following keywords:
+.PP
+\fBnever\fR
+.RS 4
+The client will not request or check any server certificate\&.
+.RE
+.PP
+\fBallow\fR
+.RS 4
+The server certificate is requested\&. If no certificate is provided, the session proceeds normally\&. If a bad certificate is provided, it will be ignored and the session proceeds normally\&.
+.RE
+.PP
+\fBtry\fR
+.RS 4
+The server certificate is requested\&. If no certificate is provided, the session proceeds normally\&. If a bad certificate is provided, the session is immediately terminated\&.
+.RE
+.PP
+\fBdemand\fR
+.RS 4
+The server certificate is requested\&. If no certificate is provided, or a bad certificate is provided, the session is immediately terminated\&. This is the default setting\&.
+.RE
+.RE
+.PP
+\fBresult_attrs\fR (default: None)
+.RS 4
+The name of the attribute whose value the query should return\&.
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+result_attrs = domain
+.fi
+.if n \{\
+.RE
+.\}
+.RE
+.PP
+\fBsaslmech\fR (default: None)
+.RS 4
+The mechanism outgoing\(cqs LDAP client should use, when it sasl\-binds to the remote LDAP server\&. Valid options are currently PLAIN or EXTERNAL\&.
+.RE
+.PP
+\fBscope\fR (default: None)
+.RS 4
+The LDAP search scope: sub, base, or one\&.
+.RE
+.PP
+\fBusetls\fR (default: No)
+.RS 4
+A Boolean option to enable or disable usage of TLS when connecting to the LDAP server\&. Valid options are Yes or No\&.
+.RE
+.SH "SEE ALSO"
+.sp
+vrfydmn(8)
+.SH "BUGS"
+.sp
+There are no known bugs so far\&. Please submit bugs to https://github\&.com/croessner/vrfydmn/issues\&.
+.SH "AUTHOR"
+.sp
+Christian Roessner <c@roessner\&.co> wrote the program\&.
+.sp
+Patrick Ben Koetter <p@sys4\&.de> wrote this man page\&.
+.SH "RESOURCES"
+.sp
+vrfydmn\(cqs home is at https://github\&.com/croessner/vrfydmn\&.
+.SH "COPYING"
+.sp
+Copyright (C) 2014\-2015 Christian Roessner\&. Free use of this software is granted under the terms of the GNU General Public License (GPL)\&.

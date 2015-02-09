@@ -1,0 +1,122 @@
+vrfydmn_ldap(5)
+===============
+:doctype: manpage
+:man source:   vrfydmn_ldap
+:man version:  0.4
+:man manual:   vrfydmn Manual
+
+
+NAME
+----
+vrfydmn_ldap - lookup RFC5322 From:-addresses in an LDAP database.
+
+
+SYNOPSIS
+--------
+*vrfydmn* -l 'ldap:///etc/vrfydmn/ldap.cfg'
+
+
+DESCRIPTION
+-----------
+
+vrfydmn uses lists and tables to lookup mail related informations. A lookup tables may be an LDAP database.
+
+In order to use LDAP lookups, specify a path to a file holding LDAP connection and query configuration. The path must be given when *vrfydmn* is invoked on command line:
+
+*vrfydmn* -l 'ldap:///etc/vrfydmn/ldap.cfg'
+
+
+OPTIONS
+-------
+
+*base* (default: None)::
+    The RFC2253 base DN at which to conduct the search, e.g.
+
+    base = ou=maildomains,dc=example,dc=com
+
+*bindmethod* (default: None)::
+    The method used when binding to the LDAP server. Valid options are simple or sasl.
+
+*cacert* (default: None)::
+    Specifies the file that contains certificates for all of the Certificate Authorities the client will recognize.
+
+        cacert = /etc/ssl/certs/cacerts.pem
+
+*cert* (default: None)::
+    Specifies the file that contains the client certificate.
+
+        cert = /etc/ssl/certs/mail.example.com-crt.pem
+
+*filter* (default: None)::
+    The RFC2254 filter used to search the directory, e.g.
+
+        filter = (domain=*)
+
+*host* (default: None)::
+    The name of the host running the LDAP server, e.g.
+
+        host = 127.0.0.1, ldap.example.com
+
+*key* (default: None)::
+    Specifies the file that contains the private key that matches the certificate stored in the cert file. Currently, the private key must not be protected with a password, so it is of critical importance that the key file is protected carefully.
+
+        key = /etc/ssl/private/mail.example.com-key.pem
+
+*reqcert* (default: *demand*)::
+    Specifies what checks to perform on server certificates in a TLS session, if any. The <level> can be specified as one of the following keywords:
+
+        *never*;;
+            The client will not request or check any server certificate.
+
+        *allow*;;
+           The server certificate is requested. If no certificate is provided, the session proceeds normally. If a bad certificate is provided, it will be ignored and the session proceeds normally.
+
+        *try*;;
+            The server certificate is requested. If no certificate is provided, the session proceeds normally. If a bad certificate is provided, the session is immediately terminated.
+
+        *demand*;;
+            The server certificate is requested. If no certificate is provided, or a bad certificate is provided, the session is immediately terminated. This is the default setting.
+
+*result_attrs* (default: None)::
+    The name of the attribute whose value the query should return.
+
+        result_attrs = domain
+
+*saslmech* (default: None)::
+    The mechanism outgoing's LDAP client should use, when it sasl-binds to the remote LDAP server. Valid options are currently PLAIN or EXTERNAL.
+
+*scope* (default: None)::
+    The LDAP search scope: sub, base, or one.
+
+*usetls* (default: No)::
+    A Boolean option to enable or disable usage of TLS when connecting to the LDAP server. Valid options are Yes or No.
+
+
+
+SEE ALSO
+--------
+vrfydmn(8)
+
+
+BUGS
+----
+There are no known bugs so far. Please submit bugs to <https://github.com/croessner/vrfydmn/issues>.
+
+
+AUTHOR
+------
+Christian Roessner <c@roessner.co> wrote the program.
+
+Patrick Ben Koetter <p@sys4.de> wrote this man page.
+
+
+RESOURCES
+---------
+vrfydmn's home is at <https://github.com/croessner/vrfydmn>.
+
+
+COPYING
+-------
+Copyright \(C) 2014-2015 Christian Roessner. Free use of this software is granted under the terms of the GNU General Public License (GPL).
+
+// vim: set ft=asciidoc:
