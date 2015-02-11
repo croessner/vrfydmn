@@ -1,0 +1,143 @@
+'\" t
+.\"     Title: vrfydmn
+.\"    Author: [see the "AUTHOR" section]
+.\" Generator: DocBook XSL Stylesheets v1.78.1 <http://docbook.sf.net/>
+.\"      Date: 02/09/2015
+.\"    Manual: vrfydmn Manual
+.\"    Source: vrfydmn 0.4
+.\"  Language: English
+.\"
+.TH "VRFYDMN" "8" "02/09/2015" "vrfydmn 0\&.4" "vrfydmn Manual"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
+.SH "NAME"
+vrfydmn \- reject an email message if the RFC5322 From:\-address does not comply\&.
+.SH "SYNOPSIS"
+.sp
+\fBvrfydmn\fR [\fIOPTIONS\fR] \fIFILE\fR
+.SH "DESCRIPTION"
+.sp
+In email everyone is free to specify any RFC5322 From:\-header address\&. Miscreants \(em virus authors, spammers and phishers \(em are aware of this fact\&. They forge the RFC5322 From:\-header address on purpose to impersonate someone that suits their goal\&.
+.sp
+Average users are not aware of this fact\&. They tend to believe a message really was sent by the person indicated in the RFC5322 From:\-header address\&.
+.sp
+vrfydmn verifies RFC5322 From:\-headers in mail messages\&. It compares a messages From:\-header field to a list of permitted sender domains assigned to the sender\&. If the address does not meet the expectations vrfydmn may either rectify the RFC5322 From:\-header or reject the message\&.
+.sp
+This program was created to control and reject phishing abuse on SMTP submission ports\&. It serves also to prevent mail loss in cases, when the given address was under DMARC policy, i\&.e\&. Yahoo or AOL\&.
+.SH "OPTIONS"
+.PP
+\fB\-u, \-\-user\fR \fIuser\fR (default: \fImilter\fR)
+.RS 4
+Run vrfydmn as user
+\fIuser\fR\&.
+.RE
+.PP
+\fB\-g, \-\-group\fR \fIgroup\fR (default: \fImilter\fR)
+.RS 4
+Run vrfydmn as group
+\fIuser\fR\&.
+.RE
+.PP
+\fB\-s, \-\-socket\fR \fIsocket\fR (default: \fIinet6:30072@[::1]\fR)
+.RS 4
+Specifes the socket vrfydmn should listen on for incoming verification requests\&. The socket consists of three parts \-
+\fIprotocol\fR,
+\fIport\fR
+and
+\fIaddress\fR\&.
+.RE
+.PP
+\fIprotocol\fR
+.RS 4
+Use
+\fIinet\fR
+as prefix to indicate an IPv4 socket e\&.g\&.
+\fIinet:10000@127\&.0\&.0\&.1\fR
+or
+\fIinet6\fR
+as prefix to indicate an IPv6 socket e\&.g\&.
+\fIinet6:30072@[::1]\fR\&.
+.RE
+.PP
+\fIport\fR
+.RS 4
+Use numbers to indicate the port vrfydmn should establish its socket on e\&.g\&.
+\fI30072\fR\&.
+.RE
+.PP
+\fIaddress\fR
+.RS 4
+Specify an IP address\&. The address type must correspond to the
+\fIprotocol\fR
+choosen\&. IPv6 addresses must be enclosed in square brackets e\&.g\&.
+\fI[address]\fR\&.
+.RE
+.PP
+\fB\-p, \-\-pid\fR \fIpidfile\fR (default: none)
+.RS 4
+Specifies the name of a file in which vrfydmn should note its process id\&.
+.RE
+.PP
+\fB\-f, \-\-file\fR \fIfile\fR (default: none)
+.RS 4
+This file typically is a postfix(8) map, i\&.e\&. relay_domains file\&. It should be a map with 2 columns\&. First column is the domain (the key) and the second column represents some value\&. The value is totally ignored in vrfydmn! If a flat file was given, the file can be refreshed during runtime by sending the SIGHUP signal and the result can be dumped to syslog (or standard out, if \-d, \-\-debug was given) with the SIGUSR1 signal\&.
+.RE
+.PP
+\fB\-l, \-\-ldap\fR \fIfile\fR (default: none)
+.RS 4
+Specifies the path to a configuration file\&. The file holds options for LDAP queries\&. If specified vrfydmn will establish a persistent LDAP connection\&. See vrfydmn_ldap(5) for details\&.
+.RE
+.PP
+\fB\-m, \-\-memcached\fR \fIsocket\fR (default: none)
+.RS 4
+Specifies a TCP socket to a memcache server\&. If enabled LDAP query results will be cached in the memcache\&. The socket must be specified as
+\fIaddress\fR
+and
+\fIport\fR
+separated by a colon e\&.g\&.
+\fI127\&.0\&.0\&.1:11211\fR\&.
+.RE
+.PP
+\fB\-f, \-\-fix\fR
+.RS 4
+If specified vrfydmn will not reject messages with RFC5322 From:\-headers that fail verification\&. Instead it will attempt to fix them\&. It will copy the erroneous header to a Reply\-To:\-header (only if none already exists)\&. Then it will replace the existing From:\-header with the envelope\-sender address (MAIL From)\&. This option is recommended for web servers\&.
+.RE
+.PP
+\fB\-d, \-\-debug\fR
+.RS 4
+This option is mainly for debugging and development purposes\&. If specified vrfydmn will not detach\&. It will run in foreground and output its activities to stdout\&.
+.RE
+.SH "SEE ALSO"
+.sp
+vrfydmn_ldap(5)
+.SH "BUGS"
+.sp
+There are no known bugs so far\&. Please submit bugs to https://github\&.com/croessner/vrfydmn/issues\&.
+.SH "AUTHOR"
+.sp
+Christian Roessner <c@roessner\&.co> wrote the program\&.
+.sp
+Patrick Ben Koetter <p@sys4\&.de> wrote this man page\&.
+.SH "RESOURCES"
+.sp
+vrfydmn\(cqs home is at https://github\&.com/croessner/vrfydmn\&.
+.SH "COPYING"
+.sp
+Copyright (C) 2014\-2015 Christian Roessner\&. Free use of this software is granted under the terms of the GNU General Public License (GPL)\&.

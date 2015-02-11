@@ -1,0 +1,95 @@
+vrfydmn(8)
+===========
+:doctype: manpage
+:man source:   vrfydmn
+:man version:  0.4
+:man manual:   vrfydmn Manual
+
+
+NAME
+----
+vrfydmn - reject an email message if the RFC5322 From:-address does not comply.
+
+
+SYNOPSIS
+--------
+*vrfydmn* ['OPTIONS'] 'FILE'
+
+
+DESCRIPTION
+-----------
+In email everyone is free to specify any RFC5322 From:-header address. Miscreants -- virus authors, spammers and phishers -- are aware of this fact. They forge the RFC5322 From:-header address on purpose to impersonate someone that suits their goal.
+
+Average users are not aware of this fact. They tend to believe a message really was sent by the person indicated in the RFC5322 From:-header address.
+
+vrfydmn verifies RFC5322 From:-headers in mail messages. It compares a messages From:-header field to a list of permitted sender domains assigned to the sender. If the address does not meet the expectations vrfydmn may either rectify the RFC5322 From:-header or reject the message.
+
+This program was created to control and reject phishing abuse on SMTP submission ports. It serves also to prevent mail loss in cases, when the given address was under DMARC policy, i.e. Yahoo or AOL.
+
+
+OPTIONS
+-------
+*-u, --user* 'user' (default: 'milter')::
+    Run vrfydmn as user 'user'.
+
+*-g, --group* 'group' (default: 'milter')::
+    Run vrfydmn as group 'user'.
+
+*-s, --socket* 'socket' (default: 'inet6:30072@[::1]')::
+    Specifes the socket vrfydmn should listen on for incoming verification requests. The socket consists of three parts - 'protocol', 'port' and 'address'. 
+
+        'protocol'::
+        Use 'inet' as prefix to indicate an IPv4 socket e.g. 'inet:10000@127.0.0.1' or 'inet6' as prefix to indicate an IPv6 socket e.g. 'inet6:30072@[::1]'.
+
+        'port'::
+        Use numbers to indicate the port vrfydmn should establish its socket on e.g. '30072'.
+
+        'address'::
+        Specify an IP address. The address type must correspond to the 'protocol' choosen. IPv6 addresses must be enclosed in square brackets e.g. '[address]'.
+
+*-p, --pid* 'pidfile' (default: none)::
+    Specifies the name of a file in which vrfydmn should note its process id.
+
+*-f, --file* 'file' (default: none)::
+    This file typically is a postfix(8) map, i.e. relay_domains file. It should be a map with 2 columns. First column is the domain (the key) and the second column represents some value. The value is totally ignored in vrfydmn! If a flat file was given, the file can  be refreshed  during  runtime  by  sending the SIGHUP signal and the result can be dumped to syslog (or standard out, if -d, --debug was given) with the SIGUSR1 signal.
+
+*-l, --ldap* 'file' (default: none)::
+    Specifies the path to a configuration file. The file holds options for LDAP queries. If specified vrfydmn will establish a persistent LDAP connection. See vrfydmn_ldap(5) for details.
+
+*-m, --memcached* 'socket' (default: none)::
+    Specifies a TCP socket to a memcache server. If enabled LDAP query results will be cached in the memcache. The socket must be specified as 'address' and 'port' separated by a colon e.g. '127.0.0.1:11211'.
+
+*-f, --fix*::
+    If specified vrfydmn will not reject messages with RFC5322 From:-headers that fail verification. Instead it will attempt to fix them. It will copy the erroneous header to a Reply-To:-header (only if none already exists). Then it will replace the existing From:-header with the envelope-sender address (MAIL From). This option is recommended for web servers.
+
+*-d, --debug*::
+    This option is mainly for debugging and development purposes. If specified vrfydmn will not detach. It will run in foreground and output its activities to stdout.
+
+
+SEE ALSO
+--------
+vrfydmn_ldap(5)
+
+
+BUGS
+----
+There are no known bugs so far. Please submit bugs to <https://github.com/croessner/vrfydmn/issues>.
+
+
+AUTHOR
+------
+Christian Roessner <c@roessner.co> wrote the program.
+
+Patrick Ben Koetter <p@sys4.de> wrote this man page.
+
+
+RESOURCES
+---------
+vrfydmn's home is at <https://github.com/croessner/vrfydmn>.
+
+
+COPYING
+-------
+Copyright \(C) 2014-2015 Christian Roessner. Free use of this software is granted under the terms of the GNU General Public License (GPL).
+
+// vim: set ft=asciidoc:
