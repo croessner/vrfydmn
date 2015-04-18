@@ -37,6 +37,13 @@ else:
     no_module_ldap = False
 
 try:
+    import MySQLdb as mdb
+except ImportError:
+    no_module_sql = True
+else:
+    no_module_sql = False
+
+try:
     import memcache
 except ImportError:
     no_module_memcache = True
@@ -59,7 +66,7 @@ PORT = 30072
 MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
-VERSION = "0.4"
+VERSION = "0.5"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -85,6 +92,9 @@ class Cfg(object):
 
     ldap_cf = None
     ldap_con = None
+
+    sql_cf = None
+    sql_con = None
 
     memcached_con = None
 
@@ -210,7 +220,29 @@ class VrfyDmnMilter(Milter.Base):
                     pass
 
             if not found and Cfg.use_sql:
-                pass
+                response = Queue()
+                if Cfg.fix_header:
+                    self.__dryrun_reject = True
+                else:
+                    self.__reject = True
+                Cfg.workerQueue.put((response,
+                                     Cfg.sql_con.querySQL,      # func
+                                     (from_domain,)))           # *args
+                result = response.get()
+                if result is True or result is None:
+                    found = True
+                    if Cfg.fix_header:
+                        self.__dryrun_reject = False
+                    else:
+                        self.__reject = False
+                elif result is False:
+                    found = False
+                    if Cfg.fix_header:
+                        self.__dryrun_reject = True
+                    else:
+                        self.__reject = True
+                else:
+                    pass
 
             if not found and Cfg.use_flatfile:
                 if Cfg.fix_header:
@@ -587,6 +619,87 @@ class LDAPDomains(Domains):
             return False
 
 
+class SQLDomains(Domains):
+    """SQL class. Currently only MySQL ist supported
+    """
+    def __init__(self, cffile):
+        Domains.__init__(self, cffile)
+
+        self.__con = None
+
+        if self._cf_read_err:
+            return
+
+        self.__host = "localhost"
+        self.__dbname = None
+        self.__dbuser = None
+        self.__dbpass = None
+        self.__query = None
+
+        for k, v in self._filecontent.items():
+            if k == "host":
+                self.__host = v
+            elif k == "port":
+                self.__port = int(v)
+            elif k == "dbuser":
+                self.__dbuser = v
+            elif k == "dbpass":
+                self.__dbpass = v
+            elif k == "dbname":
+                self.__dbname = v
+            elif k == "query":
+                self.__query = v
+
+        con = None
+        try:
+            con = mdb.connect(self.__host,
+                              self.__dbuser,
+                              self.__dbpass,
+                              self.__dbname)
+        except Exception, e:
+            if Cfg.debug:
+                traceback.print_exc()
+
+        self.__con = con
+
+    def querySQL(self, from_domain):
+        if self.__con is None:
+            return None
+        if self.__query is None:
+            return None
+
+        if Cfg.use_memcached:
+            result = Cfg.memcached_con.get(from_domain)
+            if result is not None:
+                result = bool(result)
+                if result:
+                    text = "continue"
+                else:
+                    text = "reject"
+                if Cfg.debug:
+                    print("cached_result: %s=%s" % (from_domain, text))
+                syslog(LOG_INFO, "cached_result: %s=%s" % (from_domain, text))
+                return result
+
+        try:
+            cur = self.__con.cursor()
+            cur.execute(self.__query % from_domain)
+        except Exception, e:
+            syslog(LOG_ERR, "SQL error: %s" % str(e))
+            return None
+
+        # Domain was found on SQL server, count > 0
+        if len(cur.fetchall()) > 0:
+            if Cfg.use_memcached:
+                Cfg.memcached_con.set(from_domain, True, time=3600)
+            return True
+        # ... not found
+        else:
+            if Cfg.use_memcached:
+                Cfg.memcached_con.set(from_domain, True, time=3600)
+            return False
+
+
 def runner():
     """Starts the milter loop"""
 
@@ -614,7 +727,9 @@ def db_runner():
             db_running = True
 
     if Cfg.use_sql:
-        pass
+        Cfg.sql_con = SQLDomains(Cfg.sql_cf)
+        if Cfg.sql_con is not None:
+            db_running = True
 
     if db_running:
         while True:
@@ -645,6 +760,7 @@ def usage():
 Backend:
 -f, --file              Postfix domains map file
 -l, --ldap              Config file for a LDAP connection
+-S, --sql               Config file for a SQL connection (Currently MySQL)
 -m, --memcached         memcached socket
 
 Mode:
@@ -664,7 +780,7 @@ def main():
     # Read command line options
     try:
         opts = getopt(sys.argv[1:],
-                      "s:u:g:p:hdf:l:m:F",
+                      "s:u:g:p:hdf:l:S:m:F",
                       ["socket=",
                        "user=",
                        "group=",
@@ -673,6 +789,7 @@ def main():
                        "debug",
                        "file=",
                        "ldap=",
+                       "sql",
                        "memcached="])[0]
 
         for opt, optarg in opts:
@@ -690,8 +807,14 @@ def main():
                     Cfg.use_ldap = True
                 else:
                     print >> sys.stderr, "Missing python module ldap!"
+            elif opt in ("-S", "--sql"):
+                if not no_module_sql:
+                    Cfg.sql_cf = optarg
+                    Cfg.use_sql = True
+                else:
+                    print >> sys.stderr, ";issing python module for SQL!"
             elif opt in ("-m", "--memcached"):
-                if not no_module_ldap:
+                if not no_module_memcache:
                     Cfg.memcached = optarg
                     Cfg.use_memcached = True
                 else:
