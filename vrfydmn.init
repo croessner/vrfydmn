@@ -19,7 +19,7 @@ PIDFILE="/var/run/vrfydmn/vrfydmn.pid"
 
 start_daemon() {
 	mkdir -p /var/run/${NAME}
-	chown nobody:nogroup /var/run/${NAME}
+	chown milter:milter /var/run/${NAME}
 
         echo "Starting ${NAME}"
         start-stop-daemon --start --pidfile "${PIDFILE}" \
