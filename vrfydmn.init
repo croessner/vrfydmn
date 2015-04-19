@@ -23,7 +23,7 @@ start_daemon() {
 
         echo "Starting ${NAME}"
         start-stop-daemon --start --pidfile "${PIDFILE}" \
-                --exec ${COMMAND} -- -f /etc/postfix/relay_domains
+                --exec ${COMMAND} -- -p "${PIDFILE}" -f /etc/postfix/relay_domains
         return $?
 }
 
