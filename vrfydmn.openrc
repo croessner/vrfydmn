@@ -16,7 +16,7 @@ start() {
 
         ebegin "Starting ${SVCNAME}"
         start-stop-daemon --start --pidfile "${PIDFILE}" \
-                --exec ${command} -- -f /etc/postfix/relay_domains
+                --exec ${command} -- -p "${PIDFILE}" -f /etc/postfix/relay_domains
         eend $?
 }
 
