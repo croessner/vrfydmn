@@ -647,6 +647,10 @@ class SQLDomains(Domains):
             elif k == "query":
                 self.__query = v
 
+        # Initially connect, retry on errors; see below
+        self.connect()
+
+    def connect(self):
         con = None
         try:
             con = mdb.connect(self.__host,
@@ -678,11 +682,25 @@ class SQLDomains(Domains):
                 syslog(LOG_INFO, "cached_result: %s=%s" % (from_domain, text))
                 return result
 
-        try:
-            cur = self.__con.cursor()
-            cur.execute(self.__query % from_domain)
-        except Exception, e:
-            syslog(LOG_ERR, "SQL error: %s" % str(e))
+        retries = 0
+        while retries < 3:
+            try:
+                cur = self.__con.cursor()
+                cur.execute(self.__query % from_domain)
+                break
+            except Exception, e:
+                if e[0] == 2006:
+                    # Lost connection, try reconnect
+                    syslog(LOG_ERR,
+                           "SQL connection lost (%i/3): code=%s msg=%s"
+                           % (retries+1, e[0], e[1]))
+                    self.connect()
+                    retries += 1
+                    continue
+                else:
+                    syslog(LOG_ERR, "SQL error: %s" % str(e))
+                    return None
+        if retries == 3:
             return None
 
         domains = cur.fetchall()
