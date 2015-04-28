@@ -67,6 +67,7 @@ PORT = 30072
 MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
+MAX_SQL_CONNECT_RETRIES = 3
 VERSION = "0.5"
 
 __version__ = VERSION
@@ -159,9 +160,6 @@ class VrfyDmnMilter(Milter.Base):
         if name.lower() == "from":
             self.__original_from = hval
 
-            # Remember, if a domain was found
-            found = False
-
             # Extract email from most right tuple
             decoded_from = decode_header(hval)[-1]
 
@@ -191,12 +189,16 @@ class VrfyDmnMilter(Milter.Base):
             # Cut local part from email
             from_domain = email.split("@")[1]
 
+            # Remember, if a domain was found
+            found = False
+
+            if Cfg.fix_header:
+                self.__dryrun_reject = True
+            else:
+                self.__reject = True
+
             if Cfg.use_ldap:
                 response = Queue()
-                if Cfg.fix_header:
-                    self.__dryrun_reject = True
-                else:
-                    self.__reject = True
                 Cfg.workerQueue.put((response,
                                      Cfg.ldap_con.queryLdap,    # func
                                      (from_domain,)))           # *args
@@ -207,21 +209,9 @@ class VrfyDmnMilter(Milter.Base):
                         self.__dryrun_reject = False
                     else:
                         self.__reject = False
-                elif result is False:
-                    found = False
-                    if Cfg.fix_header:
-                        self.__dryrun_reject = True
-                    else:
-                        self.__reject = True
-                else:
-                    pass
 
             if not found and Cfg.use_sql:
                 response = Queue()
-                if Cfg.fix_header:
-                    self.__dryrun_reject = True
-                else:
-                    self.__reject = True
                 Cfg.workerQueue.put((response,
                                      Cfg.sql_con.querySQL,      # func
                                      (from_domain,)))           # *args
@@ -232,20 +222,8 @@ class VrfyDmnMilter(Milter.Base):
                         self.__dryrun_reject = False
                     else:
                         self.__reject = False
-                elif result is False:
-                    found = False
-                    if Cfg.fix_header:
-                        self.__dryrun_reject = True
-                    else:
-                        self.__reject = True
-                else:
-                    pass
 
             if not found and Cfg.use_flatfile:
-                if Cfg.fix_header:
-                    self.__dryrun_reject = True
-                else:
-                    self.__reject = True
                 if PfDomains.domains != []:
                     # Honor sub domains
                     for key_domain in iter(PfDomains.domains):
@@ -682,8 +660,7 @@ class SQLDomains(Domains):
                 syslog(LOG_INFO, "cached_result: %s=%s" % (from_domain, text))
                 return result
 
-        retries = 0
-        while retries < 3:
+        for retries in xrange(MAX_SQL_CONNECT_RETRIES):
             try:
                 cur = self.__con.cursor()
                 cur.execute(self.__query % from_domain)
@@ -692,15 +669,13 @@ class SQLDomains(Domains):
                 if e[0] == 2006:
                     # Lost connection, try reconnect
                     syslog(LOG_ERR,
-                           "SQL connection lost (%i/3): code=%s msg=%s"
-                           % (retries+1, e[0], e[1]))
+                           "SQL connection lost (%i/i%): code=%s msg=%s"
+                           % (retries+1, MAX_SQL_CONNECT_RETRIES, e[0], e[1]))
                     self.connect()
-                    retries += 1
-                    continue
                 else:
                     syslog(LOG_ERR, "SQL error: %s" % str(e))
                     return None
-        if retries == 3:
+        else:
             return None
 
         domains = cur.fetchall()
