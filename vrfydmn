@@ -100,6 +100,7 @@ class Cfg(object):
 
     memcached_con = None
 
+
 class VrfyDmnMilter(Milter.Base):
     """
     Milter that comares the domain component of an email address read from the
@@ -138,7 +139,7 @@ class VrfyDmnMilter(Milter.Base):
         return Milter.CONTINUE
 
     @Milter.noreply
-    def envfrom(self, mailfrom, *str):
+    def envfrom(self, mailfrom, *dummy):
         """Callback that is called when MAIL FROM: is recognized. This also
         is the most earliest time, where we can collect nearly all connection
         specific information.
@@ -200,7 +201,7 @@ class VrfyDmnMilter(Milter.Base):
             if Cfg.use_ldap:
                 response = Queue()
                 Cfg.workerQueue.put((response,
-                                     Cfg.ldap_con.queryLdap,    # func
+                                     Cfg.ldap_con.query_ldap,    # func
                                      (from_domain,)))           # *args
                 result = response.get()
                 if result is True or result is None:
@@ -213,7 +214,7 @@ class VrfyDmnMilter(Milter.Base):
             if not found and Cfg.use_sql:
                 response = Queue()
                 Cfg.workerQueue.put((response,
-                                     Cfg.sql_con.querySQL,      # func
+                                     Cfg.sql_con.query_sql,     # func
                                      (from_domain,)))           # *args
                 result = response.get()
                 if result is True or result is None:
@@ -490,7 +491,8 @@ class LDAPDomains(Domains):
                 elif self.__reqcert == "demand":
                     reqcert = ldap.OPT_X_TLS_DEMAND
             else:
-                raise Exception("Unsupported TLS reqcert Option %s" % reqcert)
+                raise Exception("Unsupported TLS reqcert Option %s" %
+                                self.__reqcert)
             ldap.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, reqcert)
             ldap.set_option(ldap.OPT_X_TLS_CIPHER_SUITE, self.__cipher)
             if self.__cacert is not None:
@@ -526,7 +528,7 @@ class LDAPDomains(Domains):
                     con.sasl_interactive_bind_s("", auth_tokens)
                 else:
                     con.simple_bind_s(self.__binddn, self.__bindpw)
-            except Exception, e:
+            except:
                 if Cfg.debug:
                     traceback.print_exc()
                 continue
@@ -535,7 +537,7 @@ class LDAPDomains(Domains):
         self.__con = con
     
     # This method is synchronized with Queue()
-    def queryLdap(self, from_domain):
+    def query_ldap(self, from_domain):
         if self.__con is None:
             return
 
@@ -561,6 +563,7 @@ class LDAPDomains(Domains):
         else:
             raise Exception("Unsupported LDAP scope %s" % self.__scope)
 
+        ldap_filter = ""
         if "%s" in self.__filter.lower():
             filter_parts = self.__filter.split("%s")
             ldap_filter = from_domain.join(filter_parts)
@@ -635,13 +638,13 @@ class SQLDomains(Domains):
                               self.__dbuser,
                               self.__dbpass,
                               self.__dbname)
-        except Exception, e:
+        except:
             if Cfg.debug:
                 traceback.print_exc()
 
         self.__con = con
 
-    def querySQL(self, from_domain):
+    def query_sql(self, from_domain):
         if self.__con is None:
             return None
         if self.__query is None:
@@ -713,7 +716,7 @@ def db_runner():
     db_running = False
 
     if Cfg.use_memcached:
-        Cfg.memcached_con = memcache.Client([Cfg.memcached], debug=0)
+        Cfg.memcached_con = memcache.Client([Cfg.memcached_con], debug=0)
 
     if Cfg.use_ldap:
         Cfg.ldap_con = LDAPDomains(Cfg.ldap_cf)
@@ -735,7 +738,7 @@ def db_runner():
             response, func, args = req
             try:
                 result = func(*args)
-            except Exception, e:
+            except:
                 traceback.print_exc()
                 result = None
             response.put(result)
@@ -877,7 +880,7 @@ def main():
             print >> sys.stderr, ("First fork failed: (%d) %s"
                                   % (e.errno, e.strerror))
             sys.exit(1)
-        if (pid == 0):
+        if pid == 0:
             os.setsid()
             try:
                 pid = os.fork()
@@ -885,7 +888,7 @@ def main():
                 print >> sys.stderr, ("Second fork failed: (%d) %s"
                                       % (e.errno, e.strerror))
                 sys.exit(1)
-            if (pid == 0):
+            if pid == 0:
                 os.chdir("/")
                 os.umask(0)
             else:
