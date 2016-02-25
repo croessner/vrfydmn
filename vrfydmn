@@ -50,6 +50,12 @@ except ImportError:
 else:
     no_module_memcache = False
 
+try:
+    import setproctitle
+    setproctitle.setproctitle("vrfydmn")
+except:
+    pass
+
 from syslog import *
 from syslog import syslog as syslog
 from getopt import getopt
@@ -68,7 +74,7 @@ MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
 MAX_SQL_CONNECT_RETRIES = 3
-VERSION = "0.5"
+VERSION = "0.6"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -80,6 +86,7 @@ class Cfg(object):
 
     debug = False
     fix_header = False
+    opposite = False
     socketname = "inet6:%i@%s" % (PORT, BINDADDR)
     milteruser = MILTERUSER
     miltergroup = MILTERGROUP
@@ -167,7 +174,7 @@ class VrfyDmnMilter(Milter.Base):
             # Try to find the email address and to cut off garbage
             decoded_from_parts = decoded_from[0].split()
             for component in iter(decoded_from_parts):
-                # NOTE: Assume the last occurence of an "@" represents the
+                # NOTE: Asume the last occurence of an "@" represents the
                 # email address.
                 # NOTE: RFC5322 allows a mailbox-list for the From field! 
                 # Currently this fact is ignored!
@@ -195,6 +202,8 @@ class VrfyDmnMilter(Milter.Base):
 
             if Cfg.fix_header:
                 self.__dryrun_reject = True
+            elif Cfg.opposite:
+                self.__reject = False
             else:
                 self.__reject = True
 
@@ -202,12 +211,14 @@ class VrfyDmnMilter(Milter.Base):
                 response = Queue()
                 Cfg.workerQueue.put((response,
                                      Cfg.ldap_con.query_ldap,    # func
-                                     (from_domain,)))           # *args
+                                     (from_domain,)))            # *args
                 result = response.get()
                 if result is True or result is None:
                     found = True
                     if Cfg.fix_header:
                         self.__dryrun_reject = False
+                    elif Cfg.opposite:
+                        self.__reject = True
                     else:
                         self.__reject = False
 
@@ -221,6 +232,8 @@ class VrfyDmnMilter(Milter.Base):
                     found = True
                     if Cfg.fix_header:
                         self.__dryrun_reject = False
+                    elif Cfg.opposite:
+                        self.__reject = True
                     else:
                         self.__reject = False
 
@@ -231,6 +244,8 @@ class VrfyDmnMilter(Milter.Base):
                         if key_domain in from_domain:
                             if Cfg.fix_header:
                                 self.__dryrun_reject = False
+                            elif Cfg.opposite:
+                                self.__reject = True
                             else:
                                 self.__reject = False
                             break
@@ -762,6 +777,7 @@ Backend:
 
 Mode:
 -F, --fix               Replace broken From:-header with envelope sender
+-O, --opposite          Reject mail, if a sender uses our domain
 
 -h, --help              Print this help
 -d, --debug             Run on foreground
@@ -777,7 +793,7 @@ def main():
     # Read command line options
     try:
         opts = getopt(sys.argv[1:],
-                      "s:u:g:p:hdf:l:S:m:F",
+                      "s:u:g:p:hdf:l:S:m:FO",
                       ["socket=",
                        "user=",
                        "group=",
@@ -787,7 +803,9 @@ def main():
                        "file=",
                        "ldap=",
                        "sql",
-                       "memcached="])[0]
+                       "memcached=",
+                       "fix",
+                       "opposite"])[0]
 
         for opt, optarg in opts:
             if opt in ("-h", "--help"):
@@ -818,6 +836,8 @@ def main():
                     print >> sys.stderr, "Missing python module memcache!"
             elif opt in ("-F", "--fix"):
                 Cfg.fix_header = True
+            elif opt in ("-O", "--opposite"):
+                Cfg.opposite = True
             elif opt in ("-s", "--socket"):
                 Cfg.socketname = optarg
             elif opt in ("-u", "--user"):
@@ -833,7 +853,11 @@ def main():
     except Exception, e:
         print >> sys.stderr, "Syntax error: %s" % e
         sys.exit(os.EX_USAGE)
-    
+
+    if Cfg.fix_header and Cfg.opposite:
+        print >> sys.stderr, "Do not use --fix and --opposite together"
+        sys.exit(os.EX_USAGE)
+
     if pf_domains_map is not None:
         if not os.path.exists(pf_domains_map):
             print >> sys.stderr, ('No such file: %s' % pf_domains_map)
