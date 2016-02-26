@@ -830,7 +830,7 @@ def main():
                     print >> sys.stderr, ";issing python module for SQL!"
             elif opt in ("-m", "--memcached"):
                 if not no_module_memcache:
-                    Cfg.memcached = optarg
+                    Cfg.memcached_con = optarg
                     Cfg.use_memcached = True
                 else:
                     print >> sys.stderr, "Missing python module memcache!"
