@@ -56,6 +56,7 @@ try:
 except:
     pass
 
+
 from syslog import *
 from syslog import syslog as syslog
 from getopt import getopt
@@ -140,9 +141,9 @@ class VrfyDmnMilter(Milter.Base):
                                                     self.__ipname,
                                                     self.__ip,
                                                     self.__port))
-        syslog("connect from %s[%s]:%s" % (self.__ipname,
-                                           self.__ip,
-                                           self.__port))
+        #syslog("connect from %s[%s]:%s" % (self.__ipname,
+        #                                   self.__ip,
+        #                                   self.__port))
         return Milter.CONTINUE
 
     @Milter.noreply
@@ -314,9 +315,9 @@ class VrfyDmnMilter(Milter.Base):
                                                        self.__ipname,
                                                        self.__ip,
                                                        self.__port))
-        syslog("disconnect from %s[%s]:%s" % (self.__ipname,
-                                              self.__ip,
-                                              self.__port))
+        #syslog("disconnect from %s[%s]:%s" % (self.__ipname,
+        #                                      self.__ip,
+        #                                      self.__port))
 
         return Milter.CONTINUE
 
@@ -731,6 +732,7 @@ def db_runner():
     db_running = False
 
     if Cfg.use_memcached:
+        print(Cfg.memcached_con)
         Cfg.memcached_con = memcache.Client([Cfg.memcached_con], debug=0)
 
     if Cfg.use_ldap:

@@ -4,19 +4,21 @@
 # $Header: $
 
 command="/usr/local/sbin/vrfydmn"
-PIDFILE="/var/run/vrfydmn/vrfydmn.pid"
+PIDDIR="/run/${SVCNAME}"
+PIDFILE="${PIDDIR}/${SVCNAME}.pid"
 
 depend() {
 	use mta logger net
 }
 
 start() {
-	mkdir -p /var/run/vrfydmn
-	chown milter:milter /var/run/vrfydmn
+	if [ ! -d  "${PIDDIR}" ] ; then
+		checkpath -q -d -o milter:milter -m 0755 "${PIDDIR}" || return 1
+	fi
 
         ebegin "Starting ${SVCNAME}"
         start-stop-daemon --start --pidfile "${PIDFILE}" \
-                --exec ${command} -- -p "${PIDFILE}" -f /etc/postfix/relay_domains
+                --exec ${command} -- -p "${PIDFILE}" ${OPTIONS}
         eend $?
 }
 
