@@ -28,8 +28,11 @@ import threading
 import traceback
 
 try:
+    # noinspection PyUnresolvedReferences
     import ldap
+    # noinspection PyUnresolvedReferences
     import ldap.sasl
+    # noinspection PyUnresolvedReferences
     from ldap.ldapobject import ReconnectLDAPObject
 except ImportError:
     no_module_ldap = True
@@ -37,6 +40,7 @@ else:
     no_module_ldap = False
 
 try:
+    # noinspection PyUnresolvedReferences,PyPep8Naming
     import MySQLdb as mdb
 except ImportError:
     no_module_sql = True
@@ -44,6 +48,7 @@ else:
     no_module_sql = False
 
 try:
+    # noinspection PyUnresolvedReferences
     import memcache
 except ImportError:
     no_module_memcache = True
@@ -51,9 +56,10 @@ else:
     no_module_memcache = False
 
 try:
+    # noinspection PyUnresolvedReferences
     import setproctitle
     setproctitle.setproctitle("vrfydmn")
-except:
+except ImportError:
     pass
 
 
@@ -109,6 +115,7 @@ class Cfg(object):
     memcached_con = None
 
 
+# noinspection PyIncorrectDocstring
 class VrfyDmnMilter(Milter.Base):
     """
     Milter that comares the domain component of an email address read from the
@@ -141,9 +148,7 @@ class VrfyDmnMilter(Milter.Base):
                                                     self.__ipname,
                                                     self.__ip,
                                                     self.__port))
-        #syslog("connect from %s[%s]:%s" % (self.__ipname,
-        #                                   self.__ip,
-        #                                   self.__port))
+
         return Milter.CONTINUE
 
     @Milter.noreply
@@ -239,7 +244,7 @@ class VrfyDmnMilter(Milter.Base):
                         self.__reject = False
 
             if not found and Cfg.use_flatfile:
-                if PfDomains.domains != []:
+                if PfDomains.domains:
                     # Honor sub domains
                     for key_domain in iter(PfDomains.domains):
                         if key_domain in from_domain:
@@ -282,8 +287,8 @@ class VrfyDmnMilter(Milter.Base):
         """eom - end of message. If --fix was given at the command line, we
         replace the broken From:-header with the MAIL FROM value"""
 
-        if (self.__dryrun_reject and
-            self.__email != self.__mail_from):
+        if self.__dryrun_reject and \
+                self.__email != self.__mail_from:
 
             self.chgheader("From", 0, "<%s>" % self.__mail_from)
             if Cfg.debug:
@@ -315,13 +320,11 @@ class VrfyDmnMilter(Milter.Base):
                                                        self.__ipname,
                                                        self.__ip,
                                                        self.__port))
-        #syslog("disconnect from %s[%s]:%s" % (self.__ipname,
-        #                                      self.__ip,
-        #                                      self.__port))
 
         return Milter.CONTINUE
 
 
+# noinspection PyMethodParameters
 class MetaPfDomains(type):
     """
     PfDomains is a central store for all postfix domains that the milter
@@ -496,6 +499,7 @@ class LDAPDomains(Domains):
         sasl = False
 
         # Do we connect with TLS?
+        reqcert = None
         if self.__usetls.lower() in ("yes", "true", "1"):
             if self.__reqcert in ("never", "allow", "try", "demand"):
                 if self.__reqcert == "never":
@@ -520,6 +524,7 @@ class LDAPDomains(Domains):
             tls = True
 
         # Are we SASL binding to our servers?
+        auth_tokens = None
         if self.__bindmethod == "sasl":
             if self.__saslmech.lower() == "digest-md5":
                 auth_tokens = ldap.sasl.digest_md5(self.__binddn,
@@ -544,7 +549,8 @@ class LDAPDomains(Domains):
                     con.sasl_interactive_bind_s("", auth_tokens)
                 else:
                     con.simple_bind_s(self.__binddn, self.__bindpw)
-            except:
+            except Exception as e:
+                _ = e
                 if Cfg.debug:
                     traceback.print_exc()
                 continue
@@ -603,7 +609,7 @@ class LDAPDomains(Domains):
                 if Cfg.debug:
                     print "----> res_attrs = %s" % res_attrs
                     
-        if tmp_lst != []:
+        if tmp_lst:
             if Cfg.use_memcached:
                 Cfg.memcached_con.set(from_domain, True, time=3600)
             return True
@@ -654,7 +660,8 @@ class SQLDomains(Domains):
                               self.__dbuser,
                               self.__dbpass,
                               self.__dbname)
-        except:
+        except Exception as e:
+            _ = e
             if Cfg.debug:
                 traceback.print_exc()
 
@@ -684,12 +691,12 @@ class SQLDomains(Domains):
                 cur = self.__con.cursor()
                 cur.execute(self.__query % from_domain)
                 break
-            except Exception, e:
+            except Exception as e:
                 if e[0] == 2006:
                     # Lost connection, try reconnect
                     syslog(LOG_ERR,
-                           "SQL connection lost (%i/i%): code=%s msg=%s"
-                           % (retries+1, MAX_SQL_CONNECT_RETRIES, e[0], e[1]))
+                           "SQL connection lost ({}/{}): code={} msg={}".format(
+                            retries+1, MAX_SQL_CONNECT_RETRIES, e[0], e[1]))
                     self.connect()
                 else:
                     syslog(LOG_ERR, "SQL error: %s" % str(e))
@@ -755,7 +762,8 @@ def db_runner():
             response, func, args = req
             try:
                 result = func(*args)
-            except:
+            except Exception as e:
+                _ = e
                 traceback.print_exc()
                 result = None
             response.put(result)
@@ -789,6 +797,7 @@ Mode:
            MILTERGROUP)
 
 
+# noinspection PyProtectedMember
 def main():
     pf_domains_map = None
 
@@ -882,8 +891,8 @@ def main():
     try:
         # Needs Python >=2.7
         os.initgroups(Cfg.milteruser, gid)
-    except:
-        pass
+    except Exception as e:
+        _ = e
 
     try:
         os.setgid(gid)
@@ -923,7 +932,7 @@ def main():
             os._exit(0)
     
         # In daemon mode, we redirect stdin, stdout and stderr to /dev/null   
-        sys.stdin  = file(os.devnull, "r")
+        sys.stdin = file(os.devnull, "r")
         sys.stdout = file(os.devnull, "w")
         sys.stderr = file(os.devnull, "w")
     
@@ -937,11 +946,13 @@ def main():
                                   % (e.errno, e.strerror))
 
     def finish(signum, frame):
+        _ = frame
         syslog(LOG_NOTICE,
                "%s-%s milter shutdown. Caught signal %d"
                % (NAME, VERSION, signum))
     
     def reload_postfix_domains(signum, frame):
+        _ = frame
         if Cfg.debug:
             print("%s-%s milter reload Postfix domains. Caught signal %d"
                   % (NAME, VERSION, signum))
@@ -956,7 +967,9 @@ def main():
         signal.pause()
 
     def print_postfix_domains(signum, frame):
+        _ = signum, frame
         if Cfg.use_flatfile:
+            # noinspection PyTypeChecker
             all_domains = ", ".join(PfDomains.domains)
 
             # max syslog line length
