@@ -81,7 +81,7 @@ MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
 MAX_SQL_CONNECT_RETRIES = 3
-VERSION = "0.6"
+VERSION = "0.7"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -134,6 +134,8 @@ class VrfyDmnMilter(Milter.Base):
         self.__mail_from = ""
         self.__original_from = ""
         self.__add_header = True
+        self.__has_sender = False
+        self.__header = None
 
     @Milter.noreply
     def connect(self, ipname, family, hostaddr):
@@ -159,110 +161,24 @@ class VrfyDmnMilter(Milter.Base):
         """
 
         self.__mail_from = parseaddr(mailfrom)[1]
+        self.__header = dict()
 
         return Milter.CONTINUE
 
     @Milter.noreply
     def header(self, name, hval):
-        """header callback gets called for each header"""
-
-        email = ""
-
+        """header callback gets called for each header
+        """
         if Cfg.debug:
             print("%s: %s" % (name, hval))
 
         if name.lower() == "from":
             self.__original_from = hval
+            self.__header[name.lower()] = hval
 
-            # Extract email from most right tuple
-            decoded_from = decode_header(hval)[-1]
-
-            # Try to find the email address and to cut off garbage
-            decoded_from_parts = decoded_from[0].split()
-            for component in iter(decoded_from_parts):
-                # NOTE: Asume the last occurence of an "@" represents the
-                # email address.
-                # NOTE: RFC5322 allows a mailbox-list for the From field! 
-                # Currently this fact is ignored!
-                if "@" in component:
-                    email = component
-
-            email = parseaddr(email)[1]
-
-            self.__email = email
-
-            # From: <> found, skip this mail
-            if email == "":
-                if Cfg.debug:
-                    print("id=%i %s return_value=skip"
-                          % (self.__id, self.getsymval('i')))
-                syslog(LOG_INFO, "%s: return_value=skip" % self.getsymval('i'))
-
-                return Milter.CONTINUE
-
-            # Cut local part from email
-            from_domain = email.split("@")[1]
-
-            # Remember, if a domain was found
-            found = False
-
-            if Cfg.fix_header:
-                self.__dryrun_reject = True
-            elif Cfg.opposite:
-                self.__reject = False
-            else:
-                self.__reject = True
-
-            if Cfg.use_ldap:
-                response = Queue()
-                Cfg.workerQueue.put((response,
-                                     Cfg.ldap_con.query_ldap,    # func
-                                     (from_domain,)))            # *args
-                result = response.get()
-                if result is True or result is None:
-                    found = True
-                    if Cfg.fix_header:
-                        self.__dryrun_reject = False
-                    elif Cfg.opposite:
-                        self.__reject = True
-                    else:
-                        self.__reject = False
-
-            if not found and Cfg.use_sql:
-                response = Queue()
-                Cfg.workerQueue.put((response,
-                                     Cfg.sql_con.query_sql,     # func
-                                     (from_domain,)))           # *args
-                result = response.get()
-                if result is True or result is None:
-                    found = True
-                    if Cfg.fix_header:
-                        self.__dryrun_reject = False
-                    elif Cfg.opposite:
-                        self.__reject = True
-                    else:
-                        self.__reject = False
-
-            if not found and Cfg.use_flatfile:
-                if PfDomains.domains:
-                    # Honor sub domains
-                    for key_domain in iter(PfDomains.domains):
-                        if key_domain in from_domain:
-                            if Cfg.fix_header:
-                                self.__dryrun_reject = False
-                            elif Cfg.opposite:
-                                self.__reject = True
-                            else:
-                                self.__reject = False
-                            break
-
-            result = "reject" if self.__reject else "continue"
-
-            if Cfg.debug:
-                print("id=%i %s header_from=<%s> return_value=%s"
-                      % (self.__id, self.getsymval('i'), email, result))
-            syslog(LOG_INFO, "%s: header_from=<%s> return_value=%s"
-                   % (self.getsymval('i'), email, result))
+        # Mailinglists...
+        if name.lower() == "sender":
+            self.__header[name.lower()] = hval
 
         if name.lower() == "reply-to":
             self.__add_header = False
@@ -272,6 +188,103 @@ class VrfyDmnMilter(Milter.Base):
     def eoh(self):
         """eoh - end of header. Gets called after all headers have been
         proccessed"""
+
+        # We must check for a Sender header field
+        if "sender" in self.__header:
+            hval = "sender"
+        else:
+            hval = "from"
+
+        # Extract email from most right tuple
+        decoded_from = decode_header(self.__header[hval])[-1]
+
+        # Try to find the email address and to cut off garbage
+        decoded_from_parts = decoded_from[0].split()
+        email = ""
+        for component in iter(decoded_from_parts):
+            # NOTE: Asume the last occurence of an "@" represents the
+            # email address.
+            # NOTE: RFC5322 allows a mailbox-list for the From field!
+            # Currently this fact is ignored!
+            if "@" in component:
+                email = component
+
+        email = parseaddr(email)[1]
+
+        self.__email = email
+
+        # From: <> found, skip this mail
+        if email == "":
+            if Cfg.debug:
+                print("id=%i %s return_value=skip"
+                      % (self.__id, self.getsymval('i')))
+            syslog(LOG_INFO, "%s: return_value=skip" % self.getsymval('i'))
+
+            return Milter.CONTINUE
+
+        # Cut local part from email
+        from_domain = email.split("@")[1]
+
+        # Remember, if a domain was found
+        found = False
+
+        if Cfg.fix_header:
+            self.__dryrun_reject = True
+        elif Cfg.opposite:
+            self.__reject = False
+        else:
+            self.__reject = True
+
+        if Cfg.use_ldap:
+            response = Queue()
+            Cfg.workerQueue.put((response,
+                                 Cfg.ldap_con.query_ldap,    # func
+                                 (from_domain,)))            # *args
+            result = response.get()
+            if result is True or result is None:
+                found = True
+                if Cfg.fix_header:
+                    self.__dryrun_reject = False
+                elif Cfg.opposite:
+                    self.__reject = True
+                else:
+                    self.__reject = False
+
+        if not found and Cfg.use_sql:
+            response = Queue()
+            Cfg.workerQueue.put((response,
+                                 Cfg.sql_con.query_sql,     # func
+                                 (from_domain,)))           # *args
+            result = response.get()
+            if result is True or result is None:
+                found = True
+                if Cfg.fix_header:
+                    self.__dryrun_reject = False
+                elif Cfg.opposite:
+                    self.__reject = True
+                else:
+                    self.__reject = False
+
+        if not found and Cfg.use_flatfile:
+            if PfDomains.domains:
+                # Honor sub domains
+                for key_domain in iter(PfDomains.domains):
+                    if key_domain in from_domain:
+                        if Cfg.fix_header:
+                            self.__dryrun_reject = False
+                        elif Cfg.opposite:
+                            self.__reject = True
+                        else:
+                            self.__reject = False
+                        break
+
+        result = "reject" if self.__reject else "continue"
+
+        if Cfg.debug:
+            print("id=%i %s header_from=<%s> return_value=%s"
+                  % (self.__id, self.getsymval('i'), email, result))
+        syslog(LOG_INFO, "%s: header_from=<%s> return_value=%s"
+               % (self.getsymval('i'), email, result))
 
         if self.__reject:
             self.setreply("554", xcode="5.7.0", msg="Reject Queue-ID: %s - "
