@@ -81,7 +81,7 @@ MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
 MAX_SQL_CONNECT_RETRIES = 3
-VERSION = "0.7"
+VERSION = "0.7.1"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -223,7 +223,18 @@ class VrfyDmnMilter(Milter.Base):
             return Milter.CONTINUE
 
         # Cut local part from email
-        from_domain = email.split("@")[1]
+        _from_domain = email.split("@")
+        if len(_from_domain) == 1:
+            if Cfg.debug:
+                print("id=%i %s unhandled=<%s> return_value=skip"
+                      % (self.__id, self.getsymval('i')), email)
+            syslog(LOG_INFO,
+                   "%s: unhandled=<%s> return_value=skip" % (
+                    self.getsymval('i'), email))
+
+            return Milter.CONTINUE
+        else:
+            from_domain = _from_domain[1]
 
         # Remember, if a domain was found
         found = False
