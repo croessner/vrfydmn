@@ -82,7 +82,7 @@ MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
 MAX_SQL_CONNECT_RETRIES = 3
-VERSION = "0.8.1"
+VERSION = "0.8.2"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -296,7 +296,15 @@ class VrfyDmnMilter(Milter.Base):
                             self.__reject = False
                         break
 
-        result = "reject" if self.__reject and not Cfg.hold else "continue"
+        result = "continue"
+        if self.__reject:
+            if Cfg.action == Milter.CONTINUE:
+                if Cfg.hold:
+                    result = "quarantine"
+                else:
+                    result = "continue"
+            elif Cfg.action == Milter.REJECT:
+                result = "reject"
 
         if Cfg.debug:
             print("id=%i %s header_from=<%s> mail_from=<%s> return_value=%s"
@@ -314,7 +322,7 @@ class VrfyDmnMilter(Milter.Base):
                               "RFC5322 from address: <%s>"
                               % (self.getsymval('i'), self.__email))
 
-                return Cfg.action
+                return Milter.REJECT
 
         return Milter.CONTINUE
 
@@ -351,7 +359,7 @@ class VrfyDmnMilter(Milter.Base):
                 syslog(LOG_INFO, "%s: reply_to: %s"
                        % (self.getsymval('i'), new_from))
 
-        return Cfg.action
+        return Milter.CONTINUE
 
     def close(self):
         """close callback"""
@@ -911,11 +919,11 @@ def main():
                 Cfg.pidfile = optarg
             elif opt in ("-a", "--action"):
                 if optarg == "accept":
-                    Cfg.action = Milter.ACCEPT
+                    Cfg.action = Milter.CONTINUE
                 elif optarg == "reject":
                     Cfg.action = Milter.REJECT
                 elif optarg == "quarantine":
-                    Cfg.action = Milter.ACCEPT
+                    Cfg.action = Milter.CONTINUE
                     Cfg.hold = True
                 else:
                     usage(opt)
@@ -935,7 +943,8 @@ def main():
         sys.exit(os.EX_USAGE)
 
     if Cfg.fix_header:
-        Cfg.action = Milter.ACCEPT
+        Cfg.action = Milter.CONTINUE
+        Cfg.hold = False
 
     if pf_domains_map is not None:
         if not os.path.exists(pf_domains_map):
