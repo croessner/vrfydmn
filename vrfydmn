@@ -82,7 +82,7 @@ MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
 MAX_SQL_CONNECT_RETRIES = 3
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -296,18 +296,21 @@ class VrfyDmnMilter(Milter.Base):
                             self.__reject = False
                         break
 
-        result = "reject" if self.__reject else "continue"
+        result = "reject" if self.__reject and not Cfg.hold else "continue"
 
         if Cfg.debug:
-            print("id=%i %s header_from=<%s> return_value=%s"
-                  % (self.__id, self.getsymval('i'), email, result))
-        syslog(LOG_INFO, "%s: header_from=<%s> return_value=%s"
-               % (self.getsymval('i'), email, result))
+            print("id=%i %s header_from=<%s> mail_from=<%s> return_value=%s"
+                  % (self.__id,
+                     self.getsymval('i'),
+                     email,
+                     self.__mail_from,
+                     result))
+        syslog(LOG_INFO, "%s: header_from=<%s> mail_from=<%s> return_value=%s"
+               % (self.getsymval('i'), email, self.__mail_from, result))
 
         if self.__reject:
             if Cfg.action == Milter.REJECT:
                 self.setreply("554", xcode="5.7.0", msg="Reject Queue-ID: %s - "
-                              "Do not send mail with forged "
                               "RFC5322 from address: <%s>"
                               % (self.getsymval('i'), self.__email))
 
