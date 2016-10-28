@@ -487,7 +487,7 @@ class LDAPDomains(Domains):
         if self._cf_read_err:
             return
 
-        self.__host = "ldap://127.0.0.1/"
+        self.__host = ["ldap://127.0.0.1/"]
         self.__base = ""
         self.__bindmethod = "simple"
         self.__binddn = None
@@ -497,7 +497,7 @@ class LDAPDomains(Domains):
         self.__filter = "(objectClass=*)"
         self.__result_attrs = []
         self.__scope = "sub"
-        self.__usetls = False
+        self.__usetls = "no"
         self.__cipher = "TLSv1"
         self.__reqcert = "never"
         self.__cert = None
