@@ -82,7 +82,7 @@ MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
 MAX_SQL_CONNECT_RETRIES = 3
-VERSION = "0.8.2"
+VERSION = "0.8.3"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -455,6 +455,10 @@ class Domains(object):
                     line = fd.readline()
                     if line == "":
                         break
+                    if line.lstrip().startswith("#"):
+                        continue
+                    if line.strip() == "":
+                        continue
                     if line.count('=') >= 1:
                         idx = line.find('=')
                         k = line[0:idx].strip().lower()
