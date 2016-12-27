@@ -83,7 +83,7 @@ MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
 MAX_SQL_CONNECT_RETRIES = 3
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -238,7 +238,7 @@ class VrfyDmnMilter(Milter.Base):
             response = Queue()
             Cfg.workerQueue.put((response,
                                  Cfg.ldap_con.query_ldap,    # func
-                                 (from_domain if not Cfg.use_full_email else
+                                 (from_domain if not config.email else
                                   email,)))                  # *args
             result = response.get()
             if result is True or result is None:
@@ -254,7 +254,7 @@ class VrfyDmnMilter(Milter.Base):
             response = Queue()
             Cfg.workerQueue.put((response,
                                  Cfg.sql_con.query_sql,     # func
-                                 (from_domain if not Cfg.use_full_email else
+                                 (from_domain if not config.email else
                                   email,)))                 # *args
             result = response.get()
             if result is True or result is None:
@@ -266,7 +266,7 @@ class VrfyDmnMilter(Milter.Base):
                 else:
                     self.__reject = False
 
-        if not found and Cfg.use_flatfile:
+        if not found and config.file:
             if PfDomains.domains:
                 # Honor sub domains
                 for key_domain in iter(PfDomains.domains):
@@ -601,7 +601,7 @@ class LDAPDomains(Domains):
             return
 
         if config.memcached:
-            result = config.memcached_con.get(from_domain)
+            result = Cfg.memcached_con.get(from_domain)
             if result is not None:
                 result = bool(result)
                 if result:
@@ -648,11 +648,11 @@ class LDAPDomains(Domains):
                     
         if tmp_lst:
             if config.memcached:
-                config.memcached_con.set(from_domain, True, time=3600)
+                Cfg.memcached_con.set(from_domain, True, time=3600)
             return True
         else:
             if config.memcached:
-                config.memcached_con.set(from_domain, False, time=60)
+                Cfg.memcached_con.set(from_domain, False, time=60)
             return False
 
 
@@ -711,7 +711,7 @@ class SQLDomains(Domains):
             return None
 
         if config.memcached:
-            result = config.memcached_con.get(from_domain)
+            result = Cfg.memcached_con.get(from_domain)
             if result is not None:
                 result = bool(result)
                 if result:
@@ -748,12 +748,12 @@ class SQLDomains(Domains):
         # Domain was found on SQL server, count > 0
         if len(domains) > 0:
             if config.memcached:
-                config.memcached_con.set(from_domain, True, time=3600)
+                Cfg.memcached_con.set(from_domain, True, time=3600)
             return True
         # ... not found
         else:
             if config.memcached:
-                config.memcached_con.set(from_domain, False, time=3600)
+                Cfg.memcached_con.set(from_domain, False, time=3600)
             return False
 
 
@@ -808,8 +808,6 @@ def db_runner():
 
 # noinspection PyProtectedMember,PyUnresolvedReferences
 if __name__ == "__main__":
-    pf_domains_map = None
-
     parser = argparse.ArgumentParser(epilog="vrfydmn - verify domain milter")
 
     parser.add_argument("--socket", "-s",
@@ -1008,7 +1006,7 @@ if __name__ == "__main__":
                "%s-%s milter reload Postfix domains. Caught signal %d"
                % (NAME, VERSION, signum))
 
-        if config.file and pf_domains_map is not None:
+        if config.file:
             PfDomains.domains = config.file
 
         # Go back to sleep
