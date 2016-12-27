@@ -27,6 +27,7 @@ import signal
 import Milter
 import threading
 import traceback
+import argparse
 
 try:
     # noinspection PyUnresolvedReferences
@@ -82,7 +83,7 @@ MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
 MAX_SQL_CONNECT_RETRIES = 3
-VERSION = "0.8.3"
+VERSION = "0.9.0"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -91,32 +92,14 @@ __copyright__ = "Copyright (C) 2011  R.N.S."
 
 # noinspection PyUnresolvedReferences
 class Cfg(object):
-    """Store configuration parameters"""
+    """Helper class for some configuration parameters"""
 
-    debug = False
-    fix_header = False
-    opposite = False
-    socketname = "inet6:%i@%s" % (PORT, BINDADDR)
-    milteruser = MILTERUSER
-    miltergroup = MILTERGROUP
-    pidfile = None
     action = Milter.REJECT
-    hold = False  # If quarantine is set, trigger a HOLD for this email
-
+    hold = False
     workerQueue = Queue()
 
-    use_flatfile = False
-    use_ldap = False
-    use_sql = False
-    use_memcached = False
-    use_full_email = False  # LDAP and SQL may provide full email addresses
-
-    ldap_cf = None
     ldap_con = None
-
-    sql_cf = None
     sql_con = None
-
     memcached_con = None
 
 
@@ -150,7 +133,7 @@ class VrfyDmnMilter(Milter.Base):
         self.__ipname = ipname
         self.__port = hostaddr[1]
 
-        if Cfg.debug:
+        if config.debug:
             print("id=%i connect from %s[%s]:%s" % (self.__id,
                                                     self.__ipname,
                                                     self.__ip,
@@ -174,7 +157,7 @@ class VrfyDmnMilter(Milter.Base):
     def header(self, name, hval):
         """header callback gets called for each header
         """
-        if Cfg.debug:
+        if config.debug:
             print("%s: %s" % (name, hval))
 
         if name.lower() == "from":
@@ -220,7 +203,7 @@ class VrfyDmnMilter(Milter.Base):
 
         # From: <> found, skip this mail
         if email == "":
-            if Cfg.debug:
+            if config.debug:
                 print("id=%i %s return_value=skip"
                       % (self.__id, self.getsymval('i')))
             syslog(LOG_INFO, "%s: return_value=skip" % self.getsymval('i'))
@@ -230,7 +213,7 @@ class VrfyDmnMilter(Milter.Base):
         # Cut local part from email
         _from_domain = email.split("@")
         if len(_from_domain) == 1:
-            if Cfg.debug:
+            if config.debug:
                 print("id=%i %s unhandled=<%s> return_value=skip"
                       % (self.__id, self.getsymval('i'), email))
             syslog(LOG_INFO,
@@ -244,14 +227,14 @@ class VrfyDmnMilter(Milter.Base):
         # Remember, if a domain was found
         found = False
 
-        if Cfg.fix_header:
+        if config.fix:
             self.__dryrun_reject = True
-        elif Cfg.opposite:
+        elif config.opposite:
             self.__reject = False
         else:
             self.__reject = True
 
-        if Cfg.use_ldap:
+        if config.ldap:
             response = Queue()
             Cfg.workerQueue.put((response,
                                  Cfg.ldap_con.query_ldap,    # func
@@ -260,14 +243,14 @@ class VrfyDmnMilter(Milter.Base):
             result = response.get()
             if result is True or result is None:
                 found = True
-                if Cfg.fix_header:
+                if config.fix:
                     self.__dryrun_reject = False
-                elif Cfg.opposite:
+                elif config.opposite:
                     self.__reject = True
                 else:
                     self.__reject = False
 
-        if not found and Cfg.use_sql:
+        if not found and config.sql:
             response = Queue()
             Cfg.workerQueue.put((response,
                                  Cfg.sql_con.query_sql,     # func
@@ -276,9 +259,9 @@ class VrfyDmnMilter(Milter.Base):
             result = response.get()
             if result is True or result is None:
                 found = True
-                if Cfg.fix_header:
+                if config.fix:
                     self.__dryrun_reject = False
-                elif Cfg.opposite:
+                elif config.opposite:
                     self.__reject = True
                 else:
                     self.__reject = False
@@ -288,9 +271,9 @@ class VrfyDmnMilter(Milter.Base):
                 # Honor sub domains
                 for key_domain in iter(PfDomains.domains):
                     if key_domain in from_domain:
-                        if Cfg.fix_header:
+                        if config.fix:
                             self.__dryrun_reject = False
-                        elif Cfg.opposite:
+                        elif config.opposite:
                             self.__reject = True
                         else:
                             self.__reject = False
@@ -306,7 +289,7 @@ class VrfyDmnMilter(Milter.Base):
             elif Cfg.action == Milter.REJECT:
                 result = "reject"
 
-        if Cfg.debug:
+        if config.debug:
             print("id=%i %s header_from=<%s> mail_from=<%s> return_value=%s"
                   % (self.__id,
                      self.getsymval('i'),
@@ -340,7 +323,7 @@ class VrfyDmnMilter(Milter.Base):
                 self.__email != self.__mail_from:
 
             self.chgheader("From", 0, "<%s>" % self.__mail_from)
-            if Cfg.debug:
+            if config.debug:
                 print("id=%i %s header_from=<%s> mail_from=<%s>"
                       % (self.__id,
                          self.getsymval('i'),
@@ -353,7 +336,7 @@ class VrfyDmnMilter(Milter.Base):
                 self.addheader("Reply-To", self.__original_from)
                 decoded_from = decode_header(self.__original_from)
                 new_from = " ".join([s for s, _ in decoded_from])
-                if Cfg.debug:
+                if config.debug:
                     print("id=%i %s reply_to: %s"
                           % (self.__id, self.getsymval('i'), new_from))
                 syslog(LOG_INFO, "%s: reply_to: %s"
@@ -364,7 +347,7 @@ class VrfyDmnMilter(Milter.Base):
     def close(self):
         """close callback"""
 
-        if Cfg.debug:
+        if config.debug:
             print("id=%i disconnect from %s[%s]:%s" % (self.__id,
                                                        self.__ipname,
                                                        self.__ip,
@@ -373,7 +356,7 @@ class VrfyDmnMilter(Milter.Base):
         return Milter.CONTINUE
 
 
-# noinspection PyMethodParameters
+# noinspection PyMethodParameters,PyShadowingNames
 class MetaPfDomains(type):
     """
     PfDomains is a central store for all postfix domains that the milter
@@ -409,9 +392,9 @@ class MetaPfDomains(type):
                     with MetaPfDomains.__lock:
                         meta._domains = generated_list
 
-        except OSError, e:
+        except OSError as e:
             # Unable to read Postfix domains!
-            if Cfg.debug:
+            if config.debug:
                 print('Unable to read %s: %s' % (pf_file, e), file=sys.stderr)
             syslog(LOG_ERR, 'Unable to read %s: %s' % (pf_file, e))
 
@@ -429,6 +412,7 @@ class PfDomains(object):
     __metaclass__ = MetaPfDomains
 
 
+# noinspection PyShadowingNames
 class Domains(object):
     """
     Base mixin class for all kinds of lists of domains. Each database driver
@@ -469,14 +453,15 @@ class Domains(object):
                     if k != "":
                         self._filecontent[k] = v
 
-        except Exception, e:
+        except Exception as e:
             # Unable to read config file
-            if Cfg.debug:
+            if config.debug:
                 print('Unable to read %s: %s' % (cffile, e), file=sys.stderr)
             syslog(LOG_ERR, 'Unable to read %s: %s' % (cffile, e))
             self._cf_read_err = True
 
 
+# noinspection PyShadowingNames
 class LDAPDomains(Domains):
     """
     The LDAPDomains driver connects to a list of LDAP servers. It supports
@@ -602,9 +587,8 @@ class LDAPDomains(Domains):
                     con.sasl_interactive_bind_s("", auth_tokens)
                 else:
                     con.simple_bind_s(self.__binddn, self.__bindpw)
-            except Exception as e:
-                _ = e
-                if Cfg.debug:
+            except:
+                if config.debug:
                     traceback.print_exc()
                 continue
             break
@@ -616,15 +600,15 @@ class LDAPDomains(Domains):
         if self.__con is None:
             return
 
-        if Cfg.use_memcached:
-            result = Cfg.memcached_con.get(from_domain)
+        if config.memcached:
+            result = config.memcached_con.get(from_domain)
             if result is not None:
                 result = bool(result)
                 if result:
                     text = "continue"
                 else:
                     text = "reject"
-                if Cfg.debug:
+                if config.debug:
                     print("cached_result: %s=%s" % (from_domain, text))
                 syslog(LOG_INFO, "cached_result: %s=%s" % (from_domain, text))
                 return result
@@ -643,7 +627,7 @@ class LDAPDomains(Domains):
             filter_parts = self.__filter.split("%s")
             ldap_filter = from_domain.join(filter_parts)
 
-        if Cfg.debug:
+        if config.debug:
             print("====> LDAP-filter: %s" % ldap_filter)
 
         result = self.__con.search_st(self.__base,
@@ -659,19 +643,20 @@ class LDAPDomains(Domains):
         for row in iter(result):
             for res_attrs in row[1].values()[0]:
                 tmp_lst.append(res_attrs)
-                if Cfg.debug:
+                if config.debug:
                     print("----> res_attrs = %s" % res_attrs)
                     
         if tmp_lst:
-            if Cfg.use_memcached:
-                Cfg.memcached_con.set(from_domain, True, time=3600)
+            if config.memcached:
+                config.memcached_con.set(from_domain, True, time=3600)
             return True
         else:
-            if Cfg.use_memcached:
-                Cfg.memcached_con.set(from_domain, False, time=60)
+            if config.memcached:
+                config.memcached_con.set(from_domain, False, time=60)
             return False
 
 
+# noinspection PyShadowingNames
 class SQLDomains(Domains):
     """SQL class. Currently only MySQL ist supported
     """
@@ -713,9 +698,8 @@ class SQLDomains(Domains):
                               self.__dbuser,
                               self.__dbpass,
                               self.__dbname)
-        except Exception as e:
-            _ = e
-            if Cfg.debug:
+        except:
+            if config.debug:
                 traceback.print_exc()
 
         self.__con = con
@@ -726,15 +710,15 @@ class SQLDomains(Domains):
         if self.__query is None:
             return None
 
-        if Cfg.use_memcached:
-            result = Cfg.memcached_con.get(from_domain)
+        if config.memcached:
+            result = config.memcached_con.get(from_domain)
             if result is not None:
                 result = bool(result)
                 if result:
                     text = "continue"
                 else:
                     text = "reject"
-                if Cfg.debug:
+                if config.debug:
                     print("cached_result: %s=%s" % (from_domain, text))
                 syslog(LOG_INFO, "cached_result: %s=%s" % (from_domain, text))
                 return result
@@ -758,18 +742,18 @@ class SQLDomains(Domains):
             return None
 
         domains = cur.fetchall()
-        if Cfg.debug:
+        if config.debug:
             print("SQL result for %s: %s" % (from_domain, str(domains)))
 
         # Domain was found on SQL server, count > 0
         if len(domains) > 0:
-            if Cfg.use_memcached:
-                Cfg.memcached_con.set(from_domain, True, time=3600)
+            if config.memcached:
+                config.memcached_con.set(from_domain, True, time=3600)
             return True
         # ... not found
         else:
-            if Cfg.use_memcached:
-                Cfg.memcached_con.set(from_domain, False, time=3600)
+            if config.memcached:
+                config.memcached_con.set(from_domain, False, time=3600)
             return False
 
 
@@ -782,9 +766,10 @@ def runner():
     flags = Milter.CHGHDRS + Milter.ADDHDRS + Milter.QUARANTINE
     Milter.set_flags(flags)
 
-    Milter.runmilter(NAME, Cfg.socketname, timeout=300)
+    Milter.runmilter(NAME, config.socket, timeout=300)
 
 
+# noinspection PyShadowingNames
 def db_runner():
     """Implements a bi-directional queue that allows all milter threads to
     communicate with one single thread that does all DB operations.
@@ -792,17 +777,16 @@ def db_runner():
     """
     db_running = False
 
-    if Cfg.use_memcached:
-        print(Cfg.memcached_con)
-        Cfg.memcached_con = memcache.Client([Cfg.memcached_con], debug=0)
+    if config.memcached:
+        Cfg.memcached_con = memcache.Client([config.memcached], debug=0)
 
-    if Cfg.use_ldap:
-        Cfg.ldap_con = LDAPDomains(Cfg.ldap_cf)
+    if config.ldap:
+        Cfg.ldap_con = LDAPDomains(config.ldap)
         if Cfg.ldap_con is not None:
             db_running = True
 
-    if Cfg.use_sql:
-        Cfg.sql_con = SQLDomains(Cfg.sql_cf)
+    if config.sql:
+        Cfg.sql_con = SQLDomains(config.sql)
         if Cfg.sql_con is not None:
             db_running = True
 
@@ -816,147 +800,124 @@ def db_runner():
             response, func, args = req
             try:
                 result = func(*args)
-            except Exception as e:
-                _ = e
+            except:
                 traceback.print_exc()
                 result = None
             response.put(result)
 
 
-def usage(opt=None):
-    if opt:
-        print("Unknown option: %s\n" % opt, file=sys.stderr)
-
-    """Print a simple usage to stdout"""
-
-    print("""%s [options]
-
--s, --socket=           IPv4, IPv6 or unix socket (default: %s)
--u, --user=             Run milter as user (default: %s)
--g, --group=            Run milter as group (default: %s)
--p, --pid=              Pidfile to use
-
-Backend:
--f, --file=             Postfix domains map file
--l, --ldap=             Config file for a LDAP connection
--S, --sql=              Config file for a SQL connection (Currently MySQL)
--m, --memcached=        memcached socket
-
-Mode:
--F, --fix               Replace broken From:-header with envelope sender
--O, --opposite          Reject mail, if a sender uses our domain
--a, --action=           If test fails: accept, reject or quarantine
-                        (default: reject). --fix implies "accept"
-
-LDAP and SQL:
--e, --email             Use email as search key, not only the domain
-
--h, --help              Print this help
--d, --debug             Run on foreground
-    """ % (NAME,
-           "inet6:" + str(PORT) + "@" + BINDADDR,
-           MILTERUSER,
-           MILTERGROUP))
-
-
 # noinspection PyProtectedMember,PyUnresolvedReferences
-def main():
+if __name__ == "__main__":
     pf_domains_map = None
 
-    # Read command line options
-    try:
-        opts = getopt(sys.argv[1:],
-                      "s:u:g:p:hdf:l:S:m:a:FOe",
-                      ["socket=",
-                       "user=",
-                       "group=",
-                       "pid=",
-                       "help",
-                       "debug",
-                       "file=",
-                       "ldap=",
-                       "sql",
-                       "memcached=",
-                       "fix",
-                       "opposite",
-                       "action=",
-                       "email"])[0]
+    parser = argparse.ArgumentParser(epilog="vrfydmn - verify domain milter")
 
-        for opt, optarg in opts:
-            if opt in ("-h", "--help"):
-                usage()
-                sys.exit()
-            elif opt in ("-d", "--debug"):
-                Cfg.debug = True
-            elif opt in ("-f", "--file"):
-                pf_domains_map = str(optarg)
-                Cfg.use_flatfile = True
-            elif opt in ("-l", "--ldap"):
-                if not no_module_ldap:
-                    Cfg.ldap_cf = optarg
-                    Cfg.use_ldap = True
-                else:
-                    print("Missing python module ldap!", file=sys.stderr)
-            elif opt in ("-S", "--sql"):
-                if not no_module_sql:
-                    Cfg.sql_cf = optarg
-                    Cfg.use_sql = True
-                else:
-                    print("Missing python module for SQL!", file=sys.stderr)
-            elif opt in ("-m", "--memcached"):
-                if not no_module_memcache:
-                    Cfg.memcached_con = optarg
-                    Cfg.use_memcached = True
-                else:
-                    print("Missing python module memcache!", file=sys.stderr)
-            elif opt in ("-F", "--fix"):
-                Cfg.fix_header = True
-            elif opt in ("-O", "--opposite"):
-                Cfg.opposite = True
-            elif opt in ("-s", "--socket"):
-                Cfg.socketname = optarg
-            elif opt in ("-u", "--user"):
-                Cfg.milteruser = optarg
-            elif opt in ("-g", "--group"):
-                Cfg.miltergroup = optarg
-            elif opt in ("-p", "--pid"):
-                Cfg.pidfile = optarg
-            elif opt in ("-a", "--action"):
-                if optarg == "accept":
-                    Cfg.action = Milter.CONTINUE
-                elif optarg == "reject":
-                    Cfg.action = Milter.REJECT
-                elif optarg == "quarantine":
-                    Cfg.action = Milter.CONTINUE
-                    Cfg.hold = True
-                else:
-                    usage(opt)
-                    sys.exit(os.EX_USAGE)
-            elif opt in ("-e", "--email"):
-                Cfg.use_full_email = True
-            else:
-                usage(opt)
-                sys.exit(os.EX_USAGE)
+    parser.add_argument("--socket", "-s",
+                        type=str,
+                        default="inet6:{0}@{1}".format(PORT, BINDADDR),
+                        help="IPv4, IPv6 or unix socket (default: %(default)s)")
+    parser.add_argument("--syslog_name", "-n",
+                        type=str,
+                        default=NAME,
+                        help="Syslog name (default: %(default)s)")
+    parser.add_argument("--user", "-u",
+                        type=str,
+                        default=MILTERUSER,
+                        help="Run milter as this user (default: %(default)s)")
+    parser.add_argument("--group", "-g",
+                        type=str,
+                        default=MILTERGROUP,
+                        help="Run milter with this group "
+                             "(default: %(default)s)")
+    parser.add_argument("--pid", "-p",
+                        type=str,
+                        default=None,
+                        help="Path for an optional PID file")
+    parser.add_argument("--debug", "-d",
+                        default=False,
+                        action="store_true",
+                        help="Run in foreground with debugging turned on")
+    parser.add_argument("--file", "-f",
+                        type=str,
+                        default=None,
+                        help="Postfix domains map file")
+    parser.add_argument("--ldap", "-l",
+                        type=str,
+                        default=None,
+                        help="Config file for a LDAP connection")
+    parser.add_argument("--sql", "-S",
+                        type=str,
+                        default=None,
+                        help="Config file for a SQL connection (Currently "
+                             "MySQL only)")
+    parser.add_argument("--memcached", "-m",
+                        type=str,
+                        default=None,
+                        help="Memcache socket")
+    parser.add_argument("--fix", "-F",
+                        default=False,
+                        action="store_true",
+                        help="Replace broken From:-header with envelope sender")
+    parser.add_argument("--opposite", "-O",
+                        default=False,
+                        action="store_true",
+                        help="Reject mail, if a sender uses our domain")
+    parser.add_argument("--action", "-a",
+                        default="reject",
+                        choices=["accept", "reject", "quarantine"],
+                        help="If test fails: accept, reject or quarantine. "
+                             "The --fix option implies 'accept' "
+                             "(default: %(default)s)")
+    parser.add_argument("--email", "-e",
+                        default=False,
+                        action="store_true",
+                        help="Use email as search key, not only the domain")
 
-    except Exception, e:
-        print("Syntax error: %s" % e, file=sys.stderr)
-        sys.exit(os.EX_USAGE)
+    config = parser.parse_args()
 
-    if Cfg.fix_header and Cfg.opposite:
+    if config.file:
+        if not os.path.exists(config.file):
+            print('No such file: %s' % config.file, file=sys.stderr)
+            sys.exit(os.EX_USAGE)
+        # Read list of domains
+        PfDomains.domains = config.file
+
+    if config.ldap:
+        if no_module_ldap:
+            config.ldap = None
+            print("Missing python module ldap!", file=sys.stderr)
+
+    if config.sql:
+        if no_module_sql:
+            config.sql = None
+            print("Missing python module for SQL!", file=sys.stderr)
+
+    if not (config.file or config.ldap or config.sql):
+        print("You must specify at least one of --file, --ldap or --sql",
+              file=sys.stderr)
+        sys.exit(1)
+
+    if config.memcached:
+        if no_module_memcache:
+            config.memcached = None
+            print("Missing python module memcache!", file=sys.stderr)
+
+    if config.action:
+        if config.action == "accept":
+            Cfg.action = Milter.CONTINUE
+        elif config.action == "reject":
+            Cfg.action = Milter.REJECT
+        elif config.action == "quarantine":
+            Cfg.action = Milter.CONTINUE
+            Cfg.hold = True
+
+    if config.fix and config.opposite:
         print("Do not use --fix and --opposite together", file=sys.stderr)
         sys.exit(os.EX_USAGE)
 
-    if Cfg.fix_header:
+    if config.fix:
         Cfg.action = Milter.CONTINUE
         Cfg.hold = False
-
-    if pf_domains_map is not None:
-        if not os.path.exists(pf_domains_map):
-            print('No such file: %s' % pf_domains_map, file=sys.stderr)
-            sys.exit(os.EX_USAGE)
-
-        # Read list of domains
-        PfDomains.domains = pf_domains_map
 
     # We want unbuffered stdout and stderr
     unbuf_stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
@@ -964,35 +925,39 @@ def main():
     sys.stdout = unbuf_stdout
     sys.stderr = unbuf_stderr
     
-    openlog(NAME, LOG_PID, LOG_MAIL)
+    openlog(config.syslog_name, LOG_PID, LOG_MAIL)
 
-    uid = pwd.getpwnam(Cfg.milteruser)[2]
-    gid = grp.getgrnam(Cfg.miltergroup)[2]
+    try:
+        uid = pwd.getpwnam(config.user)[2]
+        gid = grp.getgrnam(config.group)[2]
+    except KeyError as e:
+        print("User or group not known: {0}".format(e.message), file=sys.stderr)
+        sys.exit(1)
 
     try:
         # Needs Python >=2.7
-        os.initgroups(Cfg.milteruser, gid)
-    except Exception as e:
-        _ = e
+        os.initgroups(config.user, gid)
+    except:
+        pass
 
     try:
         os.setgid(gid)
-    except OSError, e:
+    except OSError as e:
         print('Could not set effective group id: %s' % e, file=sys.stderr)
         sys.exit(1)
     try:
         os.setuid(uid)
-    except OSError, e:
+    except OSError as e:
         print('Could not set effective user id: %s' % e, file=sys.stderr)
         sys.exit(1)
 
-    if Cfg.debug:
+    if config.debug:
         print("Switched user to %s, group to %s" % (uid, gid))
         print("Staying in foreground...")
     else:
         try:
             pid = os.fork()
-        except OSError, e:
+        except OSError as e:
             print("First fork failed: (%d) %s" % (e.errno, e.strerror),
                   file=sys.stderr)
             sys.exit(1)
@@ -1000,7 +965,7 @@ def main():
             os.setsid()
             try:
                 pid = os.fork()
-            except OSError, e:
+            except OSError as e:
                 print("Second fork failed: (%d) %s" % (e.errno, e.strerror),
                       file=sys.stderr)
                 sys.exit(1)
@@ -1008,21 +973,23 @@ def main():
                 os.chdir("/")
                 os.umask(0)
             else:
+                # noinspection PyProtectedMember
                 os._exit(0)
         else:
+            # noinspection PyProtectedMember
             os._exit(0)
     
         # In daemon mode, we redirect stdin, stdout and stderr to /dev/null   
-        sys.stdin = file(os.devnull, "r")
-        sys.stdout = file(os.devnull, "w")
-        sys.stderr = file(os.devnull, "w")
+        sys.stdin = open(os.devnull, "r").fileno()
+        sys.stdout = open(os.devnull, "w").fileno()
+        sys.stderr = open(os.devnull, "w").fileno()
     
     try:
-        if Cfg.pidfile is not None:
-            with open(Cfg.pidfile, "w") as fd:
+        if config.pid:
+            with open(config.pid, "w") as fd:
                 fd.write(str(os.getpid()))
-    except IOError, e:
-        if Cfg.debug:
+    except IOError as e:
+        if config.debug:
             print("Cannot create PID file: (%d) %s" % (e.errno, e.strerror),
                   file=sys.stderr)
 
@@ -1034,22 +1001,22 @@ def main():
     
     def reload_postfix_domains(signum, frame):
         _ = frame
-        if Cfg.debug:
+        if config.debug:
             print("%s-%s milter reload Postfix domains. Caught signal %d"
                   % (NAME, VERSION, signum))
         syslog(LOG_NOTICE,
                "%s-%s milter reload Postfix domains. Caught signal %d"
                % (NAME, VERSION, signum))
 
-        if Cfg.use_flatfile and pf_domains_map is not None:
-            PfDomains.domains = pf_domains_map
+        if config.file and pf_domains_map is not None:
+            PfDomains.domains = config.file
 
         # Go back to sleep
         signal.pause()
 
     def print_postfix_domains(signum, frame):
         _ = signum, frame
-        if Cfg.use_flatfile:
+        if config.file:
             # noinspection PyTypeChecker
             all_domains = ", ".join(PfDomains.domains)
 
@@ -1068,7 +1035,7 @@ def main():
                     str_sgmts.append(d + all_domains[i:i+offset].strip())
 
             for part in iter(str_sgmts):
-                if Cfg.debug:
+                if config.debug:
                     print("%s-%s milter Postfix domains: [%s]"
                           % (NAME, VERSION, part))
                 syslog(LOG_NOTICE,
@@ -1102,18 +1069,14 @@ def main():
     signal.pause()
 
     try:
-        if Cfg.pidfile is not None and os.path.exists(Cfg.pidfile):
-            os.unlink(Cfg.pidfile)
-    except IOError, e:
-        if Cfg.debug:
+        if config.pid and os.path.exists(config.pid):
+            os.unlink(config.pid)
+    except IOError as e:
+        if config.debug:
             print("Cannot remove PID file: (%d) %s" % (e.errno, e.strerror),
                   file=sys.stderr)
         sys.exit(1)
 
     sys.exit(0)
-
-
-if __name__ == "__main__":
-    main()
 
 # vim: expandtab ts=4 sw=4
