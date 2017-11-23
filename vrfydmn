@@ -28,6 +28,7 @@ import Milter
 import threading
 import traceback
 import argparse
+import syslog as _syslog
 
 try:
     # noinspection PyUnresolvedReferences
@@ -83,7 +84,7 @@ MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
 MAX_SQL_CONNECT_RETRIES = 3
-VERSION = "0.9.1"
+VERSION = "0.10.0"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -818,6 +819,10 @@ if __name__ == "__main__":
                         type=str,
                         default=NAME,
                         help="Syslog name (default: %(default)s)")
+    parser.add_argument("--syslog_facility", "-N",
+                        type=str,
+                        default="mail",
+                        help="Syslog facility (default: %(default)s)")
     parser.add_argument("--user", "-u",
                         type=str,
                         default=MILTERUSER,
@@ -917,13 +922,20 @@ if __name__ == "__main__":
         Cfg.action = Milter.CONTINUE
         Cfg.hold = False
 
+    facility_name =  "LOG_" + config.syslog_facility.upper()
+    if config.debug:
+        print("Log facility_name: {}".format(facility_name))
+    facility = getattr(_syslog, facility_name, LOG_MAIL)
+    if config.debug:
+        print("Log facility: {}".format(facility))
+
     # We want unbuffered stdout and stderr
     unbuf_stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
     unbuf_stderr = os.fdopen(sys.stderr.fileno(), 'w', 0)
     sys.stdout = unbuf_stdout
     sys.stderr = unbuf_stderr
     
-    openlog(config.syslog_name, LOG_PID, LOG_MAIL)
+    openlog(config.syslog_name, LOG_PID, facility)
 
     try:
         uid = pwd.getpwnam(config.user)[2]
