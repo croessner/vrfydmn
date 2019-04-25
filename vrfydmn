@@ -1,7 +1,7 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 """
 vrfdmn - a milter service for postfix
-Copyright (C) 2014  R.N.S.
+Copyright (C) 2019  R.N.S.
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -17,7 +17,6 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-from __future__ import print_function
 
 import sys
 import os
@@ -72,7 +71,7 @@ from getopt import getopt
 from email.header import decode_header
 from email.utils import parseaddr
 from threading import Thread
-from Queue import Queue
+from queue import Queue
 
 
 NAME = "vrfydmn"
@@ -84,7 +83,7 @@ MILTERUSER = "milter"
 MILTERGROUP = "milter"
 LDAP_TIMEOUT = 60
 MAX_SQL_CONNECT_RETRIES = 3
-VERSION = "0.10.0"
+VERSION = "0.11.0"
 
 __version__ = VERSION
 __author__ = "Christian Roessner <c@roessner.co>"
@@ -126,6 +125,7 @@ class VrfyDmnMilter(Milter.Base):
         self.__has_sender = False
         self.__header = None
 
+    # noinspection PyUnusedLocal
     @Milter.noreply
     def connect(self, ipname, family, hostaddr):
         """connect callback """
@@ -142,6 +142,7 @@ class VrfyDmnMilter(Milter.Base):
 
         return Milter.CONTINUE
 
+    # noinspection PyUnusedLocal
     @Milter.noreply
     def envfrom(self, mailfrom, *dummy):
         """Callback that is called when MAIL FROM: is recognized. This also
@@ -588,8 +589,9 @@ class LDAPDomains(Domains):
                     con.sasl_interactive_bind_s("", auth_tokens)
                 else:
                     con.simple_bind_s(self.__binddn, self.__bindpw)
-            except:
+            except Exception as ldap_err:
                 if config.debug:
+                    print("Some LDAP error happened: {0}".format(ldap_err))
                     traceback.print_exc()
                 continue
             break
@@ -699,8 +701,9 @@ class SQLDomains(Domains):
                               self.__dbuser,
                               self.__dbpass,
                               self.__dbname)
-        except:
+        except Exception as m_err:
             if config.debug:
+                print("Some MySQL/MariaDB error happened: {0}".format(m_err))
                 traceback.print_exc()
 
         self.__con = con
@@ -801,7 +804,8 @@ def db_runner():
             response, func, args = req
             try:
                 result = func(*args)
-            except:
+            except Exception as gen_err:
+                print("Oops! Some error happened: {0}".format(gen_err))
                 traceback.print_exc()
                 result = None
             response.put(result)
@@ -922,19 +926,13 @@ if __name__ == "__main__":
         Cfg.action = Milter.CONTINUE
         Cfg.hold = False
 
-    facility_name =  "LOG_" + config.syslog_facility.upper()
+    facility_name = "LOG_" + config.syslog_facility.upper()
     if config.debug:
         print("Log facility_name: {}".format(facility_name))
     facility = getattr(_syslog, facility_name, LOG_MAIL)
     if config.debug:
         print("Log facility: {}".format(facility))
 
-    # We want unbuffered stdout and stderr
-    unbuf_stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
-    unbuf_stderr = os.fdopen(sys.stderr.fileno(), 'w', 0)
-    sys.stdout = unbuf_stdout
-    sys.stderr = unbuf_stderr
-    
     openlog(config.syslog_name, LOG_PID, facility)
 
     try:
@@ -947,7 +945,7 @@ if __name__ == "__main__":
     try:
         # Needs Python >=2.7
         os.initgroups(config.user, gid)
-    except:
+    except Exception as _:
         pass
 
     try:
