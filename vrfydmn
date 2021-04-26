@@ -233,6 +233,8 @@ class VrfyDmnMilter(Milter.Base):
             self.__dryrun_reject = True
         elif config.opposite:
             self.__reject = False
+        elif config.sender_alignment:
+            self.__reject = False
         else:
             self.__reject = True
 
@@ -281,6 +283,17 @@ class VrfyDmnMilter(Milter.Base):
                             self.__reject = False
                         break
 
+        # Compare From: header domain to envelope sender domain
+        if config.sender_alignment:
+            mail_from_domain = self.__mail_from.split("@")[1]
+            header_from_domain = self.__email.split("@")[1]
+            if config.email:
+                if self.__email != self.__mail_from:
+                    self.__reject = True
+            else:
+                if header_from_domain != mail_from_domain:
+                    self.__reject = True
+
         result = "continue"
         if self.__reject:
             if Cfg.action == Milter.CONTINUE:
@@ -303,9 +316,17 @@ class VrfyDmnMilter(Milter.Base):
 
         if self.__reject:
             if Cfg.action == Milter.REJECT:
-                self.setreply("554", xcode="5.7.0", msg="Reject Queue-ID: %s - "
-                              "RFC5322 from address: <%s>"
-                              % (self.getsymval('i'), self.__email))
+                if config.sender_alignment:
+                    if config.email:
+                        self.setreply("554", xcode="5.7.0", msg="Reject: Email address in From: header %s does not match envelope sender %s"
+                                % (self.__mail_from, self.__email))
+                    else:
+                        self.setreply("554", xcode="5.7.0", msg="Reject: Domain in From: header %s does not match envelope sender %s"
+                                % (self.__mail_from, self.__email))
+                else:
+                    self.setreply("554", xcode="5.7.0", msg="Reject Queue-ID: %s - "
+                                "RFC5322 from address: <%s>"
+                                % (self.getsymval('i'), self.__email))
 
                 return Milter.REJECT
 
@@ -899,8 +920,8 @@ if __name__ == "__main__":
             config.sql = None
             print("Missing python module for SQL!", file=sys.stderr)
 
-    if not (config.file or config.ldap or config.sql):
-        print("You must specify at least one of --file, --ldap or --sql",
+    if not (config.file or config.ldap or config.sql or config.sender_alignment):
+        print("You must specify at least one of --file, --ldap, --sql or --sender-alignment",
               file=sys.stderr)
         sys.exit(1)
 

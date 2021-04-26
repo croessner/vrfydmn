@@ -53,6 +53,9 @@ signal.
 This option specifies a LDAP configuration file. Settings found in this file will enable a persistent LDAP connection. See \fBvrfydmn_ldap\fR(5)
 for the syntax and available options
 .TP
+.B -A, --sender-alignment
+Checks if From: header domain and envelope sender domain are aligned.
+.TP
 .B -m, --memcached SOCKET (default: none)
 A memcached can be wrapped around a LDAP connection. SOCKET is typically 127.0.0.1:11211. Adopt it to your needs, if you want to enable support
 for this option.
