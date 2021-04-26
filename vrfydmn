@@ -196,8 +196,12 @@ class VrfyDmnMilter(Milter.Base):
             # email address.
             # NOTE: RFC5322 allows a mailbox-list for the From field!
             # Currently this fact is ignored!
-            if "@" in component:
-                email = component
+            if isinstance(component, str):
+                if "@" in component:
+                    email = component
+            else:
+                if b"@" in component:
+                    email = component.decode("utf-8")
 
         email = parseaddr(email)[1]
 
