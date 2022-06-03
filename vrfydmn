@@ -406,12 +406,10 @@ class MetaPfDomains(type):
     domains = property(_get_postfix_domains, _set_postfix_domains)
 
 
-class PfDomains(object):
+class PfDomains(object, metaclass=MetaPfDomains):
     """We use a meta class, as the "domains" variable shall not be world
     readable and writeable. This is a class with classmethods and properties
     """
-
-    __metaclass__ = MetaPfDomains
 
 
 # noinspection PyShadowingNames
@@ -887,6 +885,7 @@ if __name__ == "__main__":
             print('No such file: %s' % config.file, file=sys.stderr)
             sys.exit(os.EX_USAGE)
         # Read list of domains
+        PfDomains()
         PfDomains.domains = config.file
 
     if config.ldap:
