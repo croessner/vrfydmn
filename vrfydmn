@@ -305,7 +305,7 @@ class VrfyDmnMilter(Milter.Base):
         syslog(LOG_INFO, "%s: header_from=<%s> mail_from=<%s> return_value=%s"
                % (self.getsymval('i'), email, self.__mail_from, result))
 
-        if self.__reject:
+        if self.__reject and not config.test:
             if Cfg.action == Milter.REJECT:
                 self.setreply("554", xcode="5.7.0", msg="Reject Queue-ID: %s - "
                               "RFC5322 from address: <%s>"
@@ -326,6 +326,7 @@ class VrfyDmnMilter(Milter.Base):
                                self.__mail_from))
 
         if self.__dryrun_reject and \
+                not config.test and \
                 self.__email != self.__mail_from:
 
             self.chgheader("From", 0, "<%s>" % self.__mail_from)
@@ -881,6 +882,10 @@ if __name__ == "__main__":
                         default=False,
                         action="store_true",
                         help="Use email as search key, not only the domain")
+    parser.add_argument("--test", "-t",
+                        default=False,
+                        action="store_true",
+                        help="Enable test mode: Log actions but always return 'continue' to MTA")
 
     config = parser.parse_args()
 
@@ -912,7 +917,7 @@ if __name__ == "__main__":
             config.memcached = None
             print("Missing python module memcache!", file=sys.stderr)
 
-    if config.action:
+    if config.action and not config.test:
         if config.action == "accept":
             Cfg.action = Milter.CONTINUE
         elif config.action == "reject":
@@ -925,7 +930,7 @@ if __name__ == "__main__":
         print("Do not use --fix and --opposite together", file=sys.stderr)
         sys.exit(os.EX_USAGE)
 
-    if config.fix:
+    if config.fix and not config.test:
         Cfg.action = Milter.CONTINUE
         Cfg.hold = False
 

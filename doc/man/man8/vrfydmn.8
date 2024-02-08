@@ -64,6 +64,10 @@ the from header field with the envelope-from (MAIL FROM) mail address. This opti
 .B -d, --debug
 Run the milter in forground. In this mode, all information concerning an e-mail session will be dumped to standard out. It also will print
 out the result of the check.
+.TP
+.B -t, --test
+Enable test mode: Log actions but always return 'continue' to MTA
+.TP
 .SH SEE ALSO
 vrfydmn_ldap(5)
 .SH BUGS
